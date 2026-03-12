@@ -695,7 +695,7 @@ function SafeDetailView(props){
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
-export default function App() {
+function App() {
   const [contacts,     setContacts]     = useState([]);
   const [followups,    setFollowups]    = useState([]);
   const [view,         setView]         = useState("contacts");
