@@ -38,9 +38,12 @@ const S = {
 
 // ── CADENCE / COLD HELPERS ────────────────────────────────────────────────────
 function addDays(dateStr, days) {
-  const d = new Date(dateStr+"T00:00:00");
-  d.setDate(d.getDate()+days);
-  return d.toISOString().split("T")[0];
+  try {
+    const d = new Date((dateStr||todayStr())+"T00:00:00");
+    if (isNaN(d)) return todayStr();
+    d.setDate(d.getDate()+days);
+    return d.toISOString().split("T")[0];
+  } catch(e) { return todayStr(); }
 }
 function addMonths(dateStr, months) {
   const d = new Date(dateStr+"T00:00:00");
@@ -145,7 +148,9 @@ function rowsToContacts(rows) {
   if (!rows||rows.length<2) return [];
   const [h,...data]=rows;
   return data.filter(r=>r[0]).map(r=>{
-    const o={}; h.forEach((k,i)=>o[k]=r[i]||"");
+    const o={};
+    // Always coerce to string so numbers from Sheets never break .replace() etc.
+    h.forEach((k,i)=>{ const v=r[i]; o[k]=(v===null||v===undefined)?"":String(v); });
     try{o.conversations=JSON.parse(o.conversations||"[]");}catch{o.conversations=[];}
     try{o.cadenceCompleted=JSON.parse(o.cadenceCompleted||"[]");}catch{o.cadenceCompleted=[];}
     o.cold=o.cold==="TRUE";
@@ -930,3 +935,33 @@ export default function App() {
     </div>
   );
 }
+
+// Root error boundary so a crash never produces a blank page
+class RootErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state={error:null}; }
+  static getDerivedStateFromError(e){ return{error:e}; }
+  render(){
+    if(this.state.error){
+      return(
+        <div style={{minHeight:"100vh",background:"#080C14",display:"flex",alignItems:"center",justifyContent:"center",padding:30,fontFamily:"'DM Sans',sans-serif"}}>
+          <div style={{maxWidth:540,width:"100%"}}>
+            <p style={{color:"#F87171",fontWeight:700,fontSize:18,marginBottom:10}}>BridgeFlow ran into a problem</p>
+            <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8,marginBottom:16}}>{this.state.error?.message}{"\n\n"}{this.state.error?.stack}</pre>
+            <button onClick={()=>{ localStorage.removeItem("bf-contacts-v3"); localStorage.removeItem("bf-followups-v3"); window.location.reload(); }}
+              style={{background:"#EF4444",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit",marginRight:10}}>
+              Clear local data &amp; reload
+            </button>
+            <button onClick={()=>window.location.reload()}
+              style={{background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const _App = App;
+export default function AppWithBoundary(){ return <RootErrorBoundary><_App/></RootErrorBoundary>; }
