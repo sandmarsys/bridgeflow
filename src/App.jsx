@@ -103,7 +103,9 @@ const emptyContact = { name:"",company:"",email:"",phone:"",whatsapp:"",linkedin
 // Ensures old contacts missing new fields don't crash the app
 // Also coerces all scalar fields to strings (Google Sheets can return numbers)
 function normalizeContact(c) {
-  const str = v => (v === null || v === undefined) ? "" : String(v);
+  const str  = v => (v === null || v === undefined) ? "" : String(v);
+  const safe = v => { try { const d=new Date(v); return isNaN(d)?todayStr():v; } catch(e){ return todayStr(); }};
+  const safeEnteredAt = str(c.stageEnteredAt) || (c.createdAt ? str(c.createdAt).split("T")[0] : todayStr());
   return {
     ...c,
     name:             str(c.name),
@@ -114,11 +116,11 @@ function normalizeContact(c) {
     linkedin:         str(c.linkedin),
     notes:            str(c.notes),
     stage:            str(c.stage) || "Connection",
-    createdAt:        str(c.createdAt),
-    stageEnteredAt:   str(c.stageEnteredAt) || c.createdAt?.split("T")[0] || todayStr(),
+    createdAt:        str(c.createdAt) || new Date().toISOString(),
+    stageEnteredAt:   safe(safeEnteredAt),
     coldSince:        str(c.coldSince),
     coldFollowUpDate: str(c.coldFollowUpDate),
-    conversations:    Array.isArray(c.conversations) ? c.conversations : [],
+    conversations:    Array.isArray(c.conversations) ? c.conversations.map(cv=>({...cv, date: cv.date||new Date().toISOString(), text: str(cv.text)})) : [],
     cadenceCompleted: Array.isArray(c.cadenceCompleted) ? c.cadenceCompleted : [],
     cold:             c.cold === true || c.cold === "TRUE",
   };
