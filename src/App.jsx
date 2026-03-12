@@ -101,16 +101,26 @@ function stringToColor(str){
 const emptyContact = { name:"",company:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:"" };
 
 // Ensures old contacts missing new fields don't crash the app
+// Also coerces all scalar fields to strings (Google Sheets can return numbers)
 function normalizeContact(c) {
+  const str = v => (v === null || v === undefined) ? "" : String(v);
   return {
     ...c,
-    stage:            c.stage || "Connection",
+    name:             str(c.name),
+    company:          str(c.company),
+    email:            str(c.email),
+    phone:            str(c.phone),
+    whatsapp:         str(c.whatsapp),
+    linkedin:         str(c.linkedin),
+    notes:            str(c.notes),
+    stage:            str(c.stage) || "Connection",
+    createdAt:        str(c.createdAt),
+    stageEnteredAt:   str(c.stageEnteredAt) || c.createdAt?.split("T")[0] || todayStr(),
+    coldSince:        str(c.coldSince),
+    coldFollowUpDate: str(c.coldFollowUpDate),
     conversations:    Array.isArray(c.conversations) ? c.conversations : [],
     cadenceCompleted: Array.isArray(c.cadenceCompleted) ? c.cadenceCompleted : [],
-    stageEnteredAt:   c.stageEnteredAt || c.createdAt?.split("T")[0] || todayStr(),
-    cold:             c.cold === true || c.cold === "TRUE" ? true : false,
-    coldSince:        c.coldSince || "",
-    coldFollowUpDate: c.coldFollowUpDate || "",
+    cold:             c.cold === true || c.cold === "TRUE",
   };
 }
 
