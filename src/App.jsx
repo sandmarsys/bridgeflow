@@ -100,6 +100,20 @@ function stringToColor(str){
 
 const emptyContact = { name:"",company:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:"" };
 
+// Ensures old contacts missing new fields don't crash the app
+function normalizeContact(c) {
+  return {
+    ...c,
+    stage:            c.stage || "Connection",
+    conversations:    Array.isArray(c.conversations) ? c.conversations : [],
+    cadenceCompleted: Array.isArray(c.cadenceCompleted) ? c.cadenceCompleted : [],
+    stageEnteredAt:   c.stageEnteredAt || c.createdAt?.split("T")[0] || todayStr(),
+    cold:             c.cold === true || c.cold === "TRUE" ? true : false,
+    coldSince:        c.coldSince || "",
+    coldFollowUpDate: c.coldFollowUpDate || "",
+  };
+}
+
 // ── SHEETS SYNC ───────────────────────────────────────────────────────────────
 function contactsToRows(contacts) {
   return [
@@ -668,11 +682,12 @@ export default function App() {
   useEffect(()=>{
     const localC=localStorage.getItem(STORAGE_KEY);
     const localF=localStorage.getItem(FOLLOWUP_KEY);
-    if(localC) setContacts(JSON.parse(localC));
+    if(localC) setContacts(JSON.parse(localC).map(normalizeContact));
     if(localF) setFollowups(JSON.parse(localF));
     pullFromScript()
       .then(({contacts:c,followups:f})=>{
-        if(c.length>0||f.length>0){ setContacts(c); setFollowups(f); localStorage.setItem(STORAGE_KEY,JSON.stringify(c)); localStorage.setItem(FOLLOWUP_KEY,JSON.stringify(f)); }
+        const nc=c.map(normalizeContact);
+        if(nc.length>0||f.length>0){ setContacts(nc); setFollowups(f); localStorage.setItem(STORAGE_KEY,JSON.stringify(nc)); localStorage.setItem(FOLLOWUP_KEY,JSON.stringify(f)); }
         setSyncState("ok"); setSyncMsg("Synced with Google Sheets"); setTimeout(()=>setSyncState("idle"),3000);
       }).catch(()=>{}).finally(()=>setLoadingInit(false));
   },[]);
@@ -717,10 +732,10 @@ export default function App() {
       const stageChanged=existing&&existing.stage!==form.stage;
       const stageEnteredAt=stageChanged?todayStr():(existing?.stageEnteredAt||todayStr());
       const cadenceCompleted=stageChanged?[]:(existing?.cadenceCompleted||[]);
-      next=contacts.map(c=>c.id===selected.id?{...c,...form,stageEnteredAt,cadenceCompleted}:c);
-      setSelected(prev=>({...prev,...form,stageEnteredAt,cadenceCompleted}));
+      next=contacts.map(c=>c.id===selected.id?normalizeContact({...c,...form,stageEnteredAt,cadenceCompleted}):c);
+      setSelected(prev=>normalizeContact({...prev,...form,stageEnteredAt,cadenceCompleted}));
     } else {
-      next=[{...form,id:Date.now().toString(),createdAt:new Date().toISOString(),conversations:[],stageEnteredAt:todayStr(),cadenceCompleted:[],cold:false},...contacts];
+      next=[normalizeContact({...form,id:Date.now().toString(),createdAt:new Date().toISOString(),conversations:[],stageEnteredAt:todayStr(),cadenceCompleted:[],cold:false}),...contacts];
     }
     setContacts(next); setEditMode(false); setView(editMode?"detail":"contacts");
   };
