@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const STORAGE_KEY  = "bf-contacts-v3";
 const FOLLOWUP_KEY = "bf-followups-v3";
@@ -651,6 +651,32 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
   );
 }
 
+// ── ERROR BOUNDARY ────────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state={error:null}; }
+  static getDerivedStateFromError(e){ return{error:e}; }
+  render(){
+    if(this.state.error){
+      return(
+        <div style={{padding:30,color:"#F87171"}}>
+          <p style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong loading this contact.</p>
+          <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8}}>{this.state.error?.message}{"\n"}{this.state.error?.stack}</pre>
+          <button onClick={()=>this.props.onBack()} style={{marginTop:14,background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>← Go Back</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function SafeDetailView(props){
+  return(
+    <ErrorBoundary onBack={()=>props.setView("contacts")}>
+      <DetailView {...props}/>
+    </ErrorBoundary>
+  );
+}
+
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [contacts,     setContacts]     = useState([]);
@@ -879,7 +905,7 @@ export default function App() {
       <div style={{maxWidth:740,margin:"0 auto",padding:"30px 20px"}}>
         {view==="contacts"  &&<ContactList/>}
         {view==="dashboard" &&<Dashboard contacts={contacts} setSelected={setSelected} setView={setView}/>}
-        {view==="detail"    &&<DetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive}/>}
+        {view==="detail"    &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive}/>}
         {view==="add"       &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView}/>}
       </div>
 
