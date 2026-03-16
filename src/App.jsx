@@ -496,6 +496,7 @@ function ColdView({ contacts, setSelected, setView, onRevive }) {
 // ── FOLLOW-UP DASHBOARD ───────────────────────────────────────────────────────
 function Dashboard({ contacts, followups, setFollowups, setSelected, setView }) {
   const active = contacts.filter(c=>!c.cold);
+  const cold   = contacts.filter(c=>c.cold);
 
   // --- Cadence-based items ---
   const withCadence = active
@@ -574,7 +575,7 @@ function Dashboard({ contacts, followups, setFollowups, setSelected, setView }) 
       <div style={{marginBottom:24}}>
         <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Follow-up Dashboard</h1>
         <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>
-          {overdue.length+today.length} urgent · {soon.length} this week · {upcoming.length} upcoming · {cold.length} cold
+          {overdue.length+today.length} urgent · {soon.length} this week · {upcoming.length} upcoming
         </p>
       </div>
 
