@@ -16,7 +16,7 @@ const STAGE_META = {
 
 const CADENCE_DAYS   = [2, 5, 10, 20];
 const CADENCE_LABELS = ["Follow-up 1","Follow-up 2","Follow-up 3","Follow-up 4"];
-const COLD_MONTHS    = 3; // months until 3-month check-in
+const COLD_MONTHS    = 3;
 
 const D = {
   bg:"#080C14", surface:"#0D1220", card:"#111827",
@@ -36,7 +36,6 @@ const S = {
   secH:  {margin:"0 0 14px",fontSize:15,fontWeight:600,color:D.text},
 };
 
-// ── CADENCE / COLD HELPERS ────────────────────────────────────────────────────
 function addDays(dateStr, days) {
   try {
     const d = new Date((dateStr||todayStr())+"T00:00:00");
@@ -88,6 +87,15 @@ function getUrgency(contact) {
   return           { level:"upcoming",     color:D.textSub, label:`Due in ${diff}d`,            diff };
 }
 
+// Urgency helper for a raw date string (used for manual follow-ups)
+function getDateUrgency(dateStr) {
+  const diff = daysBetween(dateStr);
+  if (diff < 0)  return { level:"overdue", color:D.red,    label:`${Math.abs(diff)}d overdue`, diff };
+  if (diff === 0) return { level:"today",  color:"#F97316", label:"Due today",                  diff };
+  if (diff <= 2)  return { level:"soon",   color:D.yellow,  label:`Due in ${diff}d`,            diff };
+  return           { level:"upcoming",     color:D.textSub, label:`Due in ${diff}d`,            diff };
+}
+
 function formatDate(d) {
   if (!d) return "";
   return new Date(d+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
@@ -103,8 +111,6 @@ function stringToColor(str){
 
 const emptyContact = { name:"",company:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:"" };
 
-// Ensures old contacts missing new fields don't crash the app
-// Also coerces all scalar fields to strings (Google Sheets can return numbers)
 function normalizeContact(c) {
   const str  = v => (v === null || v === undefined) ? "" : String(v);
   const safe = v => { try { const d=new Date(v); return isNaN(d)?todayStr():v; } catch(e){ return todayStr(); }};
@@ -129,7 +135,6 @@ function normalizeContact(c) {
   };
 }
 
-// ── SHEETS SYNC ───────────────────────────────────────────────────────────────
 function contactsToRows(contacts) {
   return [
     ["id","name","company","email","phone","whatsapp","linkedin","stage","notes","createdAt","conversations","stageEnteredAt","cadenceCompleted","cold","coldSince","coldFollowUpDate"],
@@ -149,7 +154,6 @@ function rowsToContacts(rows) {
   const [h,...data]=rows;
   return data.filter(r=>r[0]).map(r=>{
     const o={};
-    // Always coerce to string so numbers from Sheets never break .replace() etc.
     h.forEach((k,i)=>{ const v=r[i]; o[k]=(v===null||v===undefined)?"":String(v); });
     try{o.conversations=JSON.parse(o.conversations||"[]");}catch{o.conversations=[];}
     try{o.cadenceCompleted=JSON.parse(o.cadenceCompleted||"[]");}catch{o.cadenceCompleted=[];}
@@ -174,8 +178,6 @@ async function pullFromScript() {
   return{contacts:rowsToContacts(json.contacts),followups:rowsToFollowups(json.followups)};
 }
 
-// ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
-
 function StageBadge({ stage, showDesc }) {
   const m=STAGE_META[stage]||STAGE_META.Connection;
   return(
@@ -197,6 +199,16 @@ function ColdBadge() {
 
 function UrgencyBadge({ contact }) {
   const u=getUrgency(contact); if(!u) return null;
+  return(
+    <span style={{fontSize:11,fontWeight:600,color:u.color,background:u.color+"22",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap"}}>
+      {u.level==="overdue"?"🔴":u.level==="today"?"🟠":u.level==="soon"?"🟡":"🔵"} {u.label}
+    </span>
+  );
+}
+
+// Badge for a raw urgency object (used for manual follow-ups)
+function RawUrgencyBadge({ u }) {
+  if (!u) return null;
   return(
     <span style={{fontSize:11,fontWeight:600,color:u.color,background:u.color+"22",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap"}}>
       {u.level==="overdue"?"🔴":u.level==="today"?"🟠":u.level==="soon"?"🟡":"🔵"} {u.label}
@@ -307,7 +319,6 @@ function SettingsModal({ syncState, syncMsg, exportBackup, importBackup, onClose
   );
 }
 
-// ── CADENCE TRACKER ───────────────────────────────────────────────────────────
 function CadenceTracker({ contact, onComplete, onMoveToCold }) {
   if (!contact.stageEnteredAt || contact.cold) return null;
   const cadence   = getCadenceDates(contact.stageEnteredAt);
@@ -321,7 +332,6 @@ function CadenceTracker({ contact, onComplete, onMoveToCold }) {
         <p style={{...S.secH,margin:0}}>Follow-up Cadence</p>
         <span style={{fontSize:12,color:D.textSub}}>{completed.length}/{cadence.length} completed</span>
       </div>
-
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {cadence.map((step,i)=>{
           const done  = completed.includes(step.date);
@@ -360,8 +370,6 @@ function CadenceTracker({ contact, onComplete, onMoveToCold }) {
           );
         })}
       </div>
-
-      {/* Move to Cold CTA — shown when all cadence steps are done */}
       {allDone&&(
         <div style={{marginTop:14,padding:"14px 16px",borderRadius:10,background:"#0E1520",border:`1px solid ${D.coldBorder}`}}>
           <p style={{margin:"0 0 4px",fontSize:13,fontWeight:600,color:D.coldText}}>All follow-ups completed with no response</p>
@@ -376,12 +384,10 @@ function CadenceTracker({ contact, onComplete, onMoveToCold }) {
   );
 }
 
-// ── COLD STATUS CARD (shown in detail when contact is cold) ───────────────────
 function ColdStatusCard({ contact, onRevive }) {
   if (!contact.cold) return null;
   const diff = contact.coldFollowUpDate ? daysBetween(contact.coldFollowUpDate) : null;
   const isdue = diff !== null && diff <= 0;
-
   return(
     <div style={{background:"#0A1018",border:`1.5px solid ${isdue?"#4A7A9B":D.coldBorder}`,borderRadius:12,padding:18,marginBottom:18}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
@@ -409,49 +415,155 @@ function ColdStatusCard({ contact, onRevive }) {
   );
 }
 
-// ── FOLLOW-UP DASHBOARD ───────────────────────────────────────────────────────
-function Dashboard({ contacts, setSelected, setView }) {
-  const active = contacts.filter(c=>!c.cold);
-  const cold   = contacts.filter(c=>c.cold);
-  const [showCold, setShowCold] = useState(false);
+// ── COLD VIEW ─────────────────────────────────────────────────────────────────
+function ColdView({ contacts, setSelected, setView, onRevive }) {
+  const cold = contacts.filter(c=>c.cold);
+  const due     = cold.filter(c=>c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)<=0)
+                      .sort((a,b)=>daysBetween(a.coldFollowUpDate)-daysBetween(b.coldFollowUpDate));
+  const upcoming= cold.filter(c=>c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)>0)
+                      .sort((a,b)=>daysBetween(a.coldFollowUpDate)-daysBetween(b.coldFollowUpDate));
+  const noDate  = cold.filter(c=>!c.coldFollowUpDate);
 
-  const withUrgency = active
-    .map(c=>({c, u:getUrgency(c), next:getNextCadence(c)}))
-    .filter(x=>x.next)
+  const ColdCard = ({c}) => {
+    const diff = c.coldFollowUpDate ? daysBetween(c.coldFollowUpDate) : null;
+    const isdue = diff!==null && diff<=0;
+    return(
+      <div onClick={()=>{setSelected(c);setView("detail");}}
+        style={{background:"#0A1018",border:`1.5px solid ${isdue?"#2A5A78":D.coldBorder}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13,marginBottom:6}}>
+        <div style={{width:40,height:40,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:700,color:"#fff",opacity:0.7}}>
+          {c.name.charAt(0).toUpperCase()}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontWeight:600,fontSize:14,color:D.coldText}}>{c.name}</span>
+            <ColdBadge/>
+          </div>
+          <div style={{fontSize:12,color:D.textMuted,marginTop:3}}>
+            {c.company&&<span>{c.company} · </span>}Cold since {formatDate(c.coldSince)}
+          </div>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          {c.coldFollowUpDate&&(
+            <span style={{fontSize:11,fontWeight:600,color:isdue?"#7AB8D4":D.textMuted,background:isdue?"#0D1E2E":"transparent",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap",border:isdue?"1px solid #1A3A50":"none"}}>
+              {isdue?(diff===0?"Check-in today":`Check-in ${Math.abs(diff)}d ago`):`Check-in in ${diff}d`}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return(
+    <div>
+      <div style={{marginBottom:24}}>
+        <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.coldText,letterSpacing:"-0.5px"}}>❄️ Cold Check-ins</h1>
+        <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>
+          {due.length} due now · {upcoming.length} upcoming · {cold.length} total
+        </p>
+      </div>
+
+      {cold.length===0?(
+        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
+          <div style={{fontSize:40,marginBottom:10}}>❄️</div>
+          <p style={{fontSize:14}}>No cold contacts yet. Contacts move here after completing the full follow-up cadence.</p>
+        </div>
+      ):(
+        <>
+          {due.length>0&&(
+            <div style={{marginBottom:24}}>
+              <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:"#7AB8D4",textTransform:"uppercase",letterSpacing:0.8}}>Due for Check-in · {due.length}</p>
+              {due.map(c=><ColdCard key={c.id} c={c}/>)}
+            </div>
+          )}
+          {upcoming.length>0&&(
+            <div style={{marginBottom:24}}>
+              <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:D.textSub,textTransform:"uppercase",letterSpacing:0.8}}>Upcoming · {upcoming.length}</p>
+              {upcoming.map(c=><ColdCard key={c.id} c={c}/>)}
+            </div>
+          )}
+          {noDate.length>0&&(
+            <div style={{marginBottom:24}}>
+              <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:D.textMuted,textTransform:"uppercase",letterSpacing:0.8}}>No date set · {noDate.length}</p>
+              {noDate.map(c=><ColdCard key={c.id} c={c}/>)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── FOLLOW-UP DASHBOARD ───────────────────────────────────────────────────────
+function Dashboard({ contacts, followups, setFollowups, setSelected, setView }) {
+  const active = contacts.filter(c=>!c.cold);
+
+  // --- Cadence-based items ---
+  const withCadence = active
+    .map(c=>({c, u:getUrgency(c), next:getNextCadence(c), type:"cadence"}))
+    .filter(x=>x.next);
+
+  // --- Manual follow-up items (pending, not done) ---
+  // One card per upcoming/overdue manual follow-up per contact
+  const manualItems = followups
+    .filter(f=>!f.done && f.date)
+    .map(f=>{
+      const contact = contacts.find(c=>c.id===f.contactId);
+      if (!contact) return null;
+      const u = getDateUrgency(f.date);
+      return { c: contact, fu: f, u, type:"manual" };
+    })
+    .filter(Boolean);
+
+  // Merge and sort all items together by urgency diff
+  const allItems = [...withCadence, ...manualItems]
     .sort((a,b)=>(a.u?a.u.diff:999)-(b.u?b.u.diff:999));
 
-  const overdue  = withUrgency.filter(x=>x.u&&x.u.level==="overdue");
-  const today    = withUrgency.filter(x=>x.u&&x.u.level==="today");
-  const soon     = withUrgency.filter(x=>x.u&&x.u.level==="soon");
-  const upcoming = withUrgency.filter(x=>x.u&&!["overdue","today","soon"].includes(x.u.level));
+  const overdue  = allItems.filter(x=>x.u&&x.u.level==="overdue");
+  const today    = allItems.filter(x=>x.u&&x.u.level==="today");
+  const soon     = allItems.filter(x=>x.u&&x.u.level==="soon");
+  const upcoming = allItems.filter(x=>x.u&&!["overdue","today","soon"].includes(x.u.level));
 
-  const coldDue = cold.filter(c=>c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)<=0);
+  // Count urgent (overdue + today) including manual
+  const urgentCount = overdue.length + today.length;
 
-  const Section=({title, color, items})=>{
-    if(!items.length) return null;
+  const Section = ({ title, color, items }) => {
+    if (!items.length) return null;
     return(
       <div style={{marginBottom:22}}>
         <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color,textTransform:"uppercase",letterSpacing:0.8}}>{title} · {items.length}</p>
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {items.map(({c,u,next})=>(
-            <div key={c.id} onClick={()=>{setSelected(c);setView("detail");}}
-              style={{background:D.card,border:`1.5px solid ${u?u.color+"44":D.border}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13}}>
-              <div style={{width:38,height:38,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:15,fontWeight:700,color:"#fff"}}>
-                {c.name.charAt(0).toUpperCase()}
-              </div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                  <span style={{fontWeight:600,fontSize:14,color:D.text}}>{c.name}</span>
-                  <StageBadge stage={c.stage}/>
+          {items.map((item, idx) => {
+            const { c, u, type } = item;
+            const isManual = type === "manual";
+            const fu = item.fu;
+            const rowKey = isManual ? `m-${fu.id}` : `ca-${c.id}`;
+            return(
+              <div key={rowKey} onClick={()=>{setSelected(c);setView("detail");}}
+                style={{background:D.card,border:`1.5px solid ${u?u.color+"44":D.border}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13}}>
+                <div style={{width:38,height:38,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:15,fontWeight:700,color:"#fff"}}>
+                  {c.name.charAt(0).toUpperCase()}
                 </div>
-                <div style={{fontSize:12,color:D.textSub,marginTop:3}}>
-                  {next.label} · {formatDate(next.date)}
-                  {c.company&&<span style={{marginLeft:6,color:D.textMuted}}>· {c.company}</span>}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontWeight:600,fontSize:14,color:D.text}}>{c.name}</span>
+                    <StageBadge stage={c.stage}/>
+                    {isManual&&(
+                      <span style={{fontSize:11,fontWeight:600,color:"#A78BFA",background:"#1A1040",padding:"2px 8px",borderRadius:20,border:"1px solid #3B2A7A"}}>
+                        📅 Manual
+                      </span>
+                    )}
+                  </div>
+                  <div style={{fontSize:12,color:D.textSub,marginTop:3}}>
+                    {isManual
+                      ? <>{fu.note||"Follow-up scheduled"} · {formatDate(fu.date)}{c.company&&<span style={{marginLeft:6,color:D.textMuted}}>· {c.company}</span>}</>
+                      : <>{item.next.label} · {formatDate(item.next.date)}{c.company&&<span style={{marginLeft:6,color:D.textMuted}}>· {c.company}</span>}</>
+                    }
+                  </div>
                 </div>
+                <RawUrgencyBadge u={u}/>
               </div>
-              <UrgencyBadge contact={c}/>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -466,7 +578,7 @@ function Dashboard({ contacts, setSelected, setView }) {
         </p>
       </div>
 
-      {!withUrgency.length&&!cold.length?(
+      {!allItems.length&&!cold.length?(
         <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
           <div style={{fontSize:40,marginBottom:10}}>✅</div>
           <p style={{fontSize:14}}>No follow-ups yet. Add contacts to get started.</p>
@@ -478,59 +590,7 @@ function Dashboard({ contacts, setSelected, setView }) {
           <Section title="Due Soon"  color={D.yellow}  items={soon}/>
           <Section title="Upcoming"  color={D.textSub} items={upcoming}/>
 
-          {/* COLD LIST SECTION */}
-          {cold.length>0&&(
-            <div>
-              <button onClick={()=>setShowCold(v=>!v)}
-                style={{width:"100%",background:"#0A1018",border:`1.5px solid ${D.coldBorder}`,borderRadius:12,padding:"14px 18px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,marginBottom:showCold?10:0,fontFamily:"inherit"}}>
-                <span style={{fontSize:18}}>❄️</span>
-                <div style={{textAlign:"left",flex:1}}>
-                  <p style={{margin:0,fontSize:14,fontWeight:600,color:D.coldText}}>Cold List · {cold.length} contact{cold.length>1?"s":""}</p>
-                  <p style={{margin:"2px 0 0",fontSize:12,color:D.textMuted}}>
-                    {coldDue.length>0?`${coldDue.length} check-in${coldDue.length>1?"s":""} due`:"Contacts who completed the cadence with no response"}
-                  </p>
-                </div>
-                {coldDue.length>0&&<span style={{background:"#1A3A50",color:"#7AB8D4",borderRadius:20,fontSize:12,fontWeight:700,padding:"2px 10px"}}>{coldDue.length} due</span>}
-                <span style={{color:D.textMuted,fontSize:16}}>{showCold?"▲":"▼"}</span>
-              </button>
 
-              {showCold&&(
-                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:18}}>
-                  {cold.sort((a,b)=>{
-                    const da=a.coldFollowUpDate?daysBetween(a.coldFollowUpDate):999;
-                    const db=b.coldFollowUpDate?daysBetween(b.coldFollowUpDate):999;
-                    return da-db;
-                  }).map(c=>{
-                    const diff=c.coldFollowUpDate?daysBetween(c.coldFollowUpDate):null;
-                    const due=diff!==null&&diff<=0;
-                    return(
-                      <div key={c.id} onClick={()=>{setSelected(c);setView("detail");}}
-                        style={{background:"#0A1018",border:`1.5px solid ${due?"#2A5A78":D.coldBorder}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13}}>
-                        <div style={{width:38,height:38,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:15,fontWeight:700,color:"#fff",opacity:0.7}}>
-                          {c.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                            <span style={{fontWeight:600,fontSize:14,color:D.coldText}}>{c.name}</span>
-                            <ColdBadge/>
-                          </div>
-                          <div style={{fontSize:12,color:D.textMuted,marginTop:3}}>
-                            {c.company&&<span>{c.company} · </span>}
-                            Cold since {formatDate(c.coldSince)}
-                          </div>
-                        </div>
-                        {c.coldFollowUpDate&&(
-                          <span style={{fontSize:11,fontWeight:600,color:due?"#7AB8D4":D.textMuted,background:due?"#0D1E2E":"transparent",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap",border:due?"1px solid #1A3A50":"none"}}>
-                            {due?(diff===0?"Check-in today":`Check-in ${Math.abs(diff)}d ago`):`Check-in ${diff}d`}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
         </>
       )}
     </div>
@@ -568,10 +628,8 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
         </div>
       </div>
 
-      {/* Cold status */}
       <ColdStatusCard contact={contact} onRevive={()=>onRevive(contact.id)}/>
 
-      {/* Pipeline progress — only for active contacts */}
       {!contact.cold&&(
         <div style={{...S.card}}>
           <p style={{...S.secH,marginBottom:14}}>Pipeline Progress</p>
@@ -588,10 +646,8 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
         </div>
       )}
 
-      {/* Cadence tracker */}
       <CadenceTracker contact={contact} onComplete={(date)=>onCompleteCadence(contact.id,date)} onMoveToCold={()=>onMoveToCold(contact.id)}/>
 
-      {/* Contact info */}
       <div style={{...S.card}}>
         <p style={S.secH}>Contact Info</p>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 20px"}}>
@@ -603,7 +659,6 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
         </div>
       </div>
 
-      {/* Manual follow-ups */}
       {!contact.cold&&(
         <div style={{...S.card}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -621,25 +676,27 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
           {cFU.length===0
             ?<p style={{fontSize:14,color:D.textMuted,margin:0}}>No manual follow-ups scheduled</p>
             :<div style={{display:"flex",flexDirection:"column",gap:7}}>
-              {cFU.map(fu=>(
-                <div key={fu.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,background:isOverdue(fu.date)&&!fu.done?"#120800":D.surface,border:`1px solid ${isOverdue(fu.date)&&!fu.done?"#4A2E00":D.border}`}}>
-                  <input type="checkbox" checked={fu.done} onChange={()=>setFollowups(fs=>fs.map(f=>f.id===fu.id?{...f,done:!f.done}:f))} style={{width:15,height:15,cursor:"pointer",accentColor:D.accent}}/>
-                  <div style={{flex:1}}>
-                    <span style={{fontSize:13,fontWeight:600,color:fu.done?D.textMuted:isOverdue(fu.date)?"#FCD34D":D.text,textDecoration:fu.done?"line-through":"none"}}>
-                      {isToday(fu.date)?"Today":formatDate(fu.date)}
-                      {isOverdue(fu.date)&&!fu.done&&<span style={{marginLeft:6,fontSize:11,background:"#1C1000",color:"#FCD34D",padding:"1px 6px",borderRadius:10}}>Overdue</span>}
-                    </span>
-                    {fu.note&&<p style={{margin:"2px 0 0",fontSize:13,color:fu.done?D.textMuted:D.textSub}}>{fu.note}</p>}
+              {cFU.map(fu=>{
+                const u = !fu.done ? getDateUrgency(fu.date) : null;
+                return(
+                  <div key={fu.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,background:isOverdue(fu.date)&&!fu.done?"#120800":D.surface,border:`1px solid ${isOverdue(fu.date)&&!fu.done?"#4A2E00":D.border}`}}>
+                    <input type="checkbox" checked={fu.done} onChange={()=>setFollowups(fs=>fs.map(f=>f.id===fu.id?{...f,done:!f.done}:f))} style={{width:15,height:15,cursor:"pointer",accentColor:D.accent}}/>
+                    <div style={{flex:1}}>
+                      <span style={{fontSize:13,fontWeight:600,color:fu.done?D.textMuted:isOverdue(fu.date)?"#FCD34D":D.text,textDecoration:fu.done?"line-through":"none"}}>
+                        {isToday(fu.date)?"Today":formatDate(fu.date)}
+                      </span>
+                      {fu.note&&<p style={{margin:"2px 0 0",fontSize:13,color:fu.done?D.textMuted:D.textSub}}>{fu.note}</p>}
+                    </div>
+                    {!fu.done && u && <RawUrgencyBadge u={u}/>}
+                    <button onClick={()=>setFollowups(fs=>fs.filter(f=>f.id!==fu.id))} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:18,padding:0,lineHeight:1}}>×</button>
                   </div>
-                  <button onClick={()=>setFollowups(fs=>fs.filter(f=>f.id!==fu.id))} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:18,padding:0,lineHeight:1}}>×</button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           }
         </div>
       )}
 
-      {/* Conversation log */}
       <div style={{...S.card}}>
         <p style={S.secH}>Conversation Log</p>
         <div style={{display:"flex",gap:8,marginBottom:14}}>
@@ -668,7 +725,6 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
   );
 }
 
-// ── ERROR BOUNDARY ────────────────────────────────────────────────────────────
 class ErrorBoundary extends React.Component {
   constructor(props){ super(props); this.state={error:null}; }
   static getDerivedStateFromError(e){ return{error:e}; }
@@ -694,7 +750,6 @@ function SafeDetailView(props){
   );
 }
 
-// ── MAIN APP ──────────────────────────────────────────────────────────────────
 function App() {
   const [contacts,     setContacts]     = useState([]);
   const [followups,    setFollowups]    = useState([]);
@@ -717,9 +772,14 @@ function App() {
   const logRef     = useRef(null);
   const initialized= useRef(false);
 
+  // Urgent count includes both cadence urgency AND pending manual follow-ups due today/overdue
   const urgentCount = contacts.filter(c=>{
     if (c.cold) return c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)<=0;
     const u=getUrgency(c); return u&&(u.level==="overdue"||u.level==="today");
+  }).length + followups.filter(f=>{
+    if (f.done || !f.date) return false;
+    const u = getDateUrgency(f.date);
+    return u.level==="overdue"||u.level==="today";
   }).length;
 
   useEffect(()=>{
@@ -766,7 +826,6 @@ function App() {
     r.readAsText(file); e.target.value="";
   };
 
-  // ── SAVE CONTACT ──────────────────────────────────────────────
   const saveContact=()=>{
     if(!form.name.trim()) return;
     let next;
@@ -797,7 +856,6 @@ function App() {
     setNewFU({date:"",note:""}); setShowFU(false);
   };
 
-  // Mark cadence step done — auto-move to cold if last step
   const onCompleteCadence=(contactId, date)=>{
     setContacts(prev=>{
       const u=prev.map(c=>{
@@ -813,7 +871,6 @@ function App() {
     showToast("Follow-up marked complete!");
   };
 
-  // Move to cold list
   const onMoveToCold=(contactId)=>{
     const coldSince=todayStr();
     const coldFollowUpDate=addMonths(coldSince, COLD_MONTHS);
@@ -825,7 +882,6 @@ function App() {
     showToast("Contact moved to Cold list. Check-in set for 3 months.");
   };
 
-  // Revive from cold — reset to Connection
   const onRevive=(contactId)=>{
     setContacts(prev=>{
       const u=prev.map(c=>c.id===contactId?{...c,cold:false,coldSince:"",coldFollowUpDate:"",stage:"Connection",stageEnteredAt:todayStr(),cadenceCompleted:[]}:c);
@@ -906,13 +962,18 @@ function App() {
       <div style={{background:D.surface,borderBottom:`1px solid ${D.border}`,padding:"0 20px",display:"flex",alignItems:"center",height:52,gap:12}}>
         <span style={{fontSize:18,fontWeight:700,color:D.text,letterSpacing:"-0.3px"}}>BridgeFlow</span>
         <div style={{display:"flex",gap:2,background:D.card,borderRadius:8,padding:3,marginLeft:8}}>
-          {[["contacts","👥 Contacts"],["dashboard","📅 Follow-ups"]].map(([t,label])=>(
-            <button key={t} onClick={()=>{setTab(t);setView(t==="contacts"?"contacts":"dashboard");}}
+          {[["contacts","👥 Contacts"],["dashboard","📅 Follow-ups"],["cold","❄️ Cold"]].map(([t,label])=>{
+            const badge = t==="dashboard" ? urgentCount
+              : t==="cold" ? contacts.filter(c=>c.cold && c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)<=0).length
+              : 0;
+            return(
+            <button key={t} onClick={()=>{setTab(t);setView(t==="contacts"?"contacts":t==="dashboard"?"dashboard":"cold");}}
               style={{padding:"4px 12px",borderRadius:6,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t?600:400,background:tab===t?D.accent:"transparent",color:tab===t?"#fff":D.textSub,border:"none",display:"flex",alignItems:"center",gap:5}}>
               {label}
-              {t==="dashboard"&&urgentCount>0&&<span style={{background:D.red,color:"#fff",borderRadius:20,fontSize:11,fontWeight:700,padding:"0 5px",lineHeight:"16px"}}>{urgentCount}</span>}
+              {badge>0&&<span style={{background:t==="cold"?"#1A3A50":D.red,color:t==="cold"?"#7AB8D4":"#fff",borderRadius:20,fontSize:11,fontWeight:700,padding:"0 5px",lineHeight:"16px"}}>{badge}</span>}
             </button>
-          ))}
+            );
+          })}
         </div>
         <div style={{flex:1}}/>
         <SyncDot/>
@@ -921,7 +982,8 @@ function App() {
 
       <div style={{maxWidth:740,margin:"0 auto",padding:"30px 20px"}}>
         {view==="contacts"  &&<ContactList/>}
-        {view==="dashboard" &&<Dashboard contacts={contacts} setSelected={setSelected} setView={setView}/>}
+        {view==="dashboard" &&<Dashboard contacts={contacts} followups={followups} setFollowups={setFollowups} setSelected={setSelected} setView={setView}/>}
+        {view==="cold"      &&<ColdView contacts={contacts} setSelected={setSelected} setView={setView} onRevive={onRevive}/>}
         {view==="detail"    &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive}/>}
         {view==="add"       &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView}/>}
       </div>
@@ -936,7 +998,6 @@ function App() {
   );
 }
 
-// Root error boundary so a crash never produces a blank page
 class RootErrorBoundary extends React.Component {
   constructor(props){ super(props); this.state={error:null}; }
   static getDerivedStateFromError(e){ return{error:e}; }
