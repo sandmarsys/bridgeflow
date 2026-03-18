@@ -38,7 +38,9 @@ const S = {
 
 function addDays(dateStr, days) {
   try {
-    const d = new Date((dateStr||todayStr())+"T00:00:00");
+    // Strip any time component so we always work with a plain YYYY-MM-DD
+    const clean = (dateStr||todayStr()).split("T")[0];
+    const d = new Date(clean+"T00:00:00");
     if (isNaN(d)) return todayStr();
     d.setDate(d.getDate()+days);
     return d.toISOString().split("T")[0];
@@ -126,7 +128,7 @@ function normalizeContact(c) {
     notes:            str(c.notes),
     stage:            str(c.stage) || "Connection",
     createdAt:        str(c.createdAt) || new Date().toISOString(),
-    stageEnteredAt:   safe(safeEnteredAt),
+    stageEnteredAt:   safe(safeEnteredAt).split("T")[0],
     coldSince:        str(c.coldSince),
     coldFollowUpDate: str(c.coldFollowUpDate),
     conversations:    Array.isArray(c.conversations) ? c.conversations.map(cv=>({...cv, date: cv.date||new Date().toISOString(), text: str(cv.text)})) : [],
