@@ -419,221 +419,324 @@ function ColdStatusCard({ contact, onRevive }) {
 }
 
 // ── CALENDAR VIEW ─────────────────────────────────────────────────────────────
+const HOURS = Array.from({length:24},(_,i)=>i); // 0..23
+const CAL_COLORS = ["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#EF4444","#6366F1"];
+function calColor(str){ let h=0; for(let i=0;i<str.length;i++) h=str.charCodeAt(i)+((h<<5)-h); return CAL_COLORS[Math.abs(h)%CAL_COLORS.length]; }
+
 function CalendarView({ contacts }) {
+  const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+
+  // weekStart = Monday of the currently viewed week
+  const getWeekStart = (d) => {
+    const dt = new Date(d); dt.setHours(0,0,0,0);
+    const day = dt.getDay(); // 0=Sun
+    const diff = day===0 ? -6 : 1-day;
+    dt.setDate(dt.getDate()+diff);
+    return dt;
+  };
+
+  const [weekStart,   setWeekStart]   = useState(()=>getWeekStart(new Date()));
+  const [monthBase,   setMonthBase]   = useState(()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
   const [events,      setEvents]      = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState(null);
+  const [loading,     setLoading]     = useState(false);
   const [calLinks,    setCalLinks]    = useState(()=>{ try{ return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}"); }catch{ return {}; }});
-  const [linkingId,   setLinkingId]   = useState(null); // eventId being linked
+  const [linkingId,   setLinkingId]   = useState(null);
   const [searchQ,     setSearchQ]     = useState("");
+  const [selectedEv,  setSelectedEv]  = useState(null);
+  const gridRef = useRef(null);
 
   useEffect(()=>{ localStorage.setItem(CAL_LINKS_KEY, JSON.stringify(calLinks)); }, [calLinks]);
 
+  // Scroll to 8am on mount
+  useEffect(()=>{ if(gridRef.current) gridRef.current.scrollTop = 8*56; },[]);
+
+  // Week days Mon–Sun
+  const weekDays = Array.from({length:7},(_,i)=>{ const d=new Date(weekStart); d.setDate(d.getDate()+i); return d; });
+
+  // Fetch events for current week
   const fetchEvents = useCallback(async()=>{
-    setLoading(true); setError(null);
+    setLoading(true);
     try {
-      const now   = new Date();
-      const end   = new Date(); end.setDate(end.getDate()+7);
-      const fmt   = d => d.toISOString().replace("Z","").split(".")[0];
-      const res   = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
+      const end = new Date(weekStart); end.setDate(end.getDate()+7);
+      const fmt = d => d.toISOString().split(".")[0];
+      const res = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          tools:[{
-            type:"mcp_1",
-            name:"gcal_list_events",
-            url:"https://gcal.mcp.claude.com/mcp",
-            input:{
-              calendarId:"primary",
-              timeMin:fmt(now),
-              timeMax:fmt(end),
-              timeZone:"America/New_York",
-              condenseEventDetails:false,
-              maxResults:50
-            }
-          }],
-          messages:[{role:"user",content:"List my calendar events for the next 7 days. Return only the raw JSON tool result, no commentary."}]
+          model:"claude-sonnet-4-20250514", max_tokens:2000,
+          system:"You are a calendar assistant. When asked to list events, call the gcal_list_events tool and return ONLY the raw JSON from the tool result — no text, no markdown.",
+          mcp_servers:[{type:"url",url:"https://gcal.mcp.claude.com/mcp",name:"gcal"}],
+          messages:[{role:"user",content:`List all my Google Calendar events from ${fmt(weekStart)} to ${fmt(end)} in timezone America/New_York. Return only JSON.`}]
         })
       });
       const data = await res.json();
-      // Extract mcp_tool_result blocks
       const resultBlock = (data.content||[]).find(b=>b.type==="mcp_tool_result");
       const textBlock   = (data.content||[]).find(b=>b.type==="text");
-      let raw = resultBlock?.content?.[0]?.text || textBlock?.text || "{}";
-      try {
-        const parsed = JSON.parse(raw);
-        const evts   = parsed.events || [];
-        setEvents(Array.isArray(evts) ? evts : []);
-      } catch {
-        // Try to pull events from text response directly
-        setEvents([]);
-      }
-    } catch(e) { setError("Could not load calendar. Check your connection."); }
-    finally { setLoading(false); }
-  },[]);
+      const raw = resultBlock?.content?.[0]?.text || textBlock?.text || "{}";
+      try { const p=JSON.parse(raw); setEvents(Array.isArray(p.events)?p.events:[]); } catch { setEvents([]); }
+    } catch { setEvents([]); }
+    setLoading(false);
+  },[weekStart]);
 
-  useEffect(()=>{ fetchEvents(); },[]);
+  useEffect(()=>{ fetchEvents(); },[fetchEvents]);
 
-  const linkContact = (eventId, contactId) => {
-    setCalLinks(prev=>({...prev,[eventId]:contactId}));
-    setLinkingId(null);
-  };
-  const unlinkContact = (eventId) => {
-    setCalLinks(prev=>{ const n={...prev}; delete n[eventId]; return n; });
-  };
+  // Navigate week
+  const prevWeek = () => { const d=new Date(weekStart); d.setDate(d.getDate()-7); setWeekStart(d); };
+  const nextWeek = () => { const d=new Date(weekStart); d.setDate(d.getDate()+7); setWeekStart(d); };
+  const goToday  = () => { setWeekStart(getWeekStart(new Date())); setMonthBase(()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; }); };
 
-  const formatEventTime = (ev) => {
-    if (ev.allDay) return "All day";
-    const s = ev.start?.dateTime;
-    const e = ev.end?.dateTime;
-    if (!s) return "";
-    const opts = {hour:"numeric",minute:"2-digit",hour12:true};
-    const start = new Date(s).toLocaleTimeString("en-US",opts);
-    const end   = e ? new Date(e).toLocaleTimeString("en-US",opts) : "";
-    return end ? `${start} – ${end}` : start;
+  // Get events for a specific day
+  const eventsForDay = (day) => {
+    const ds = day.toISOString().split("T")[0];
+    return events.filter(ev=>{
+      const s = ev.start?.dateTime||ev.start?.date||"";
+      return s.startsWith(ds);
+    });
   };
 
-  const formatEventDay = (ev) => {
-    const d = ev.start?.dateTime || ev.start?.date;
-    if (!d) return "";
-    const dt = new Date(d);
-    const today = new Date(); today.setHours(0,0,0,0);
-    const tom   = new Date(today); tom.setDate(tom.getDate()+1);
-    dt.setHours(0,0,0,0);
-    if (dt.getTime()===today.getTime()) return "Today";
-    if (dt.getTime()===tom.getTime())   return "Tomorrow";
-    return dt.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+  // Event positioning inside the grid cell
+  const evStyle = (ev) => {
+    const s = new Date(ev.start?.dateTime||ev.start?.date);
+    const e = new Date(ev.end?.dateTime||ev.end?.date);
+    const startMin = s.getHours()*60+s.getMinutes();
+    const endMin   = e.getHours()*60+e.getMinutes();
+    const top      = (startMin/60)*56;
+    const height   = Math.max(((endMin-startMin)/60)*56, 22);
+    const color    = calColor(ev.summary||"event");
+    return { top, height, color };
   };
 
-  // Group events by day label
-  const grouped = events.reduce((acc,ev)=>{
-    const day = formatEventDay(ev);
-    if (!acc[day]) acc[day]=[];
-    acc[day].push(ev);
-    return acc;
-  },{});
+  const fmtHour = h => { const ampm=h<12?"AM":"PM"; const hr=h===0?12:h>12?h-12:h; return `${hr} ${ampm}`; };
+  const fmtTime = dt => { if(!dt) return ""; return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true}); };
 
-  const dayOrder = Object.keys(grouped);
+  // ── MONTH MINI-VIEW ──────────────────────────────────────────────────────────
+  const MonthMini = () => {
+    const year  = monthBase.getFullYear();
+    const month = monthBase.getMonth();
+    const firstDay = new Date(year,month,1).getDay(); // 0=Sun
+    const daysInMonth = new Date(year,month+1,0).getDate();
+    // pad to start on Sunday
+    const blanks = firstDay;
+    const cells  = Array.from({length: blanks+daysInMonth},(_,i)=> i<blanks ? null : i-blanks+1);
+    // pad to complete last row
+    while(cells.length%7!==0) cells.push(null);
 
-  return(
-    <div>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
-        <div>
-          <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>📅 Calendar</h1>
-          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>Next 7 days · {events.length} event{events.length!==1?"s":""}</p>
+    const isInWeek = (dayNum) => {
+      if(!dayNum) return false;
+      const d = new Date(year,month,dayNum); d.setHours(0,0,0,0);
+      return d>=weekStart && d<new Date(weekStart.getTime()+7*86400000);
+    };
+    const isToday2 = (dayNum) => {
+      if(!dayNum) return false;
+      const d = new Date(year,month,dayNum); d.setHours(0,0,0,0);
+      return d.getTime()===todayDate.getTime();
+    };
+    const clickDay = (dayNum) => {
+      if(!dayNum) return;
+      const d = new Date(year,month,dayNum);
+      setWeekStart(getWeekStart(d));
+    };
+
+    return(
+      <div style={{width:200,flexShrink:0}}>
+        {/* Month nav */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <button onClick={()=>{const d=new Date(monthBase);d.setMonth(d.getMonth()-1);setMonthBase(d);}} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:16,padding:"2px 6px"}}>‹</button>
+          <span style={{fontSize:13,fontWeight:600,color:D.text}}>{monthBase.toLocaleDateString("en-US",{month:"long",year:"numeric"})}</span>
+          <button onClick={()=>{const d=new Date(monthBase);d.setMonth(d.getMonth()+1);setMonthBase(d);}} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:16,padding:"2px 6px"}}>›</button>
         </div>
-        <button onClick={fetchEvents} style={{...S.btnSm,display:"flex",alignItems:"center",gap:6}} disabled={loading}>
-          {loading?"⟳ Loading…":"⟳ Refresh"}
-        </button>
-      </div>
-
-      {error&&(
-        <div style={{background:"#1A0808",border:`1px solid #5C1A1A`,borderRadius:10,padding:"12px 16px",marginBottom:18,color:"#FCA5A5",fontSize:13}}>{error}</div>
-      )}
-
-      {loading&&!error&&(
-        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
-          <div style={{fontSize:32,marginBottom:10,animation:"pulse 1s infinite"}}>📅</div>
-          <p style={{fontSize:14}}>Loading your calendar…</p>
+        {/* Day headers */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+          {["S","M","T","W","T","F","S"].map((d,i)=>(
+            <div key={i} style={{textAlign:"center",fontSize:10,fontWeight:600,color:D.textMuted,padding:"2px 0"}}>{d}</div>
+          ))}
         </div>
-      )}
-
-      {!loading&&!error&&events.length===0&&(
-        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
-          <div style={{fontSize:40,marginBottom:10}}>✅</div>
-          <p style={{fontSize:14}}>No events in the next 7 days.</p>
-          <p style={{fontSize:13,marginTop:4}}>Meetings booked via your Tydical link will appear here automatically.</p>
+        {/* Day cells */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
+          {cells.map((d,i)=>(
+            <div key={i} onClick={()=>clickDay(d)}
+              style={{textAlign:"center",fontSize:11,padding:"3px 0",borderRadius:4,
+                cursor:d?"pointer":"default",
+                background:isInWeek(d)?"#1A2D4A":"transparent",
+                color:isToday2(d)?D.accent:d?D.text:D.textMuted,
+                fontWeight:isToday2(d)?700:400,
+                outline:isToday2(d)?`1.5px solid ${D.accent}`:"none",
+              }}>
+              {d||""}
+            </div>
+          ))}
         </div>
-      )}
 
-      {!loading&&dayOrder.map(day=>(
-        <div key={day} style={{marginBottom:24}}>
-          <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:D.textSub,textTransform:"uppercase",letterSpacing:0.8}}>{day}</p>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {grouped[day].map(ev=>{
-              const linkedId  = calLinks[ev.id];
-              const linked    = linkedId ? contacts.find(c=>c.id===linkedId) : null;
-              const isLinking = linkingId===ev.id;
-              const m         = linked ? (STAGE_META[linked.stage]||STAGE_META.Connection) : null;
+        {/* Upcoming events list */}
+        <div style={{marginTop:20}}>
+          <p style={{margin:"0 0 8px",fontSize:11,fontWeight:600,color:D.textMuted,textTransform:"uppercase",letterSpacing:0.6}}>This Week</p>
+          {events.length===0&&!loading&&<p style={{fontSize:12,color:D.textMuted,margin:0}}>No events</p>}
+          {loading&&<p style={{fontSize:12,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading…</p>}
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {events.slice(0,8).map(ev=>{
+              const color=calColor(ev.summary||"event");
               return(
-                <div key={ev.id} style={{background:D.card,border:`1.5px solid ${linked?m.dot+"66":D.border}`,borderRadius:12,padding:"14px 16px"}}>
-                  <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                        <span style={{fontWeight:600,fontSize:15,color:D.text}}>{ev.summary||"(No title)"}</span>
-                        {linked&&<StageBadge stage={linked.stage}/>}
-                      </div>
-                      <div style={{fontSize:13,color:D.textSub,marginBottom:linked||ev.numAttendees>1?6:0}}>
-                        🕐 {formatEventTime(ev)}
-                        {ev.location&&<span style={{marginLeft:10}}>📍 {ev.location}</span>}
-                      </div>
-                      {ev.numAttendees>1&&<div style={{fontSize:12,color:D.textMuted}}>👥 {ev.numAttendees} attendees</div>}
-                      {linked&&(
-                        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,padding:"6px 10px",borderRadius:8,background:m.bg,border:`1px solid ${m.dot}33`,width:"fit-content"}}>
-                          <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>
-                            {linked.name.charAt(0).toUpperCase()}
-                          </div>
-                          <span style={{fontSize:13,fontWeight:600,color:m.text}}>{linked.name}</span>
-                          {linked.company&&<span style={{fontSize:12,color:D.textMuted}}>· {linked.company}</span>}
-                          <button onClick={()=>unlinkContact(ev.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0,marginLeft:4,lineHeight:1}}>×</button>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{flexShrink:0}}>
-                      {ev.htmlLink&&(
-                        <a href={ev.htmlLink} target="_blank" rel="noreferrer"
-                          style={{...S.btnSm,display:"inline-block",textDecoration:"none",marginBottom:6,fontSize:12}}>
-                          Open ↗
-                        </a>
-                      )}
-                      <button onClick={()=>setLinkingId(isLinking?null:ev.id)}
-                        style={{...S.btnSm,display:"block",fontSize:12,color:linked?D.textMuted:D.accent,borderColor:linked?D.border:D.accent+"66",width:"100%"}}>
-                        {linked?"Relink":"🔗 Link"}
-                      </button>
-                    </div>
+                <div key={ev.id} onClick={()=>setSelectedEv(ev)}
+                  style={{display:"flex",gap:7,alignItems:"flex-start",cursor:"pointer",padding:"3px 0"}}>
+                  <div style={{width:3,borderRadius:2,background:color,flexShrink:0,marginTop:3,height:30}}/>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:11,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{ev.summary||"(No title)"}</div>
+                    <div style={{fontSize:10,color:D.textMuted}}>{fmtTime(ev.start?.dateTime)}</div>
                   </div>
-
-                  {/* Link contact dropdown */}
-                  {isLinking&&(
-                    <div style={{marginTop:12,background:D.surface,borderRadius:8,border:`1px solid ${D.border}`,overflow:"hidden"}}>
-                      <div style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`}}>
-                        <input autoFocus value={searchQ} onChange={e=>setSearchQ(e.target.value)}
-                          placeholder="Search contacts…"
-                          style={{...S.inp,padding:"6px 10px",fontSize:13}}/>
-                      </div>
-                      <div style={{maxHeight:200,overflowY:"auto"}}>
-                        {contacts.filter(c=>!c.cold&&(c.name.toLowerCase().includes(searchQ.toLowerCase())||(c.company||"").toLowerCase().includes(searchQ.toLowerCase()))).map(c=>(
-                          <div key={c.id} onClick={()=>{ linkContact(ev.id,c.id); setSearchQ(""); }}
-                            style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",cursor:"pointer",borderBottom:`1px solid ${D.border}`}}
-                            onMouseEnter={e=>e.currentTarget.style.background="#1A2535"}
-                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                            <div style={{width:28,height:28,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0}}>
-                              {c.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <div style={{fontSize:13,fontWeight:600,color:D.text}}>{c.name}</div>
-                              {c.company&&<div style={{fontSize:12,color:D.textMuted}}>{c.company}</div>}
-                            </div>
-                            <StageBadge stage={c.stage}/>
-                          </div>
-                        ))}
-                        {contacts.filter(c=>!c.cold&&c.name.toLowerCase().includes(searchQ.toLowerCase())).length===0&&(
-                          <p style={{padding:"12px",fontSize:13,color:D.textMuted,margin:0}}>No contacts found</p>
-                        )}
-                      </div>
-                      <div style={{padding:"8px 12px",borderTop:`1px solid ${D.border}`}}>
-                        <button onClick={()=>{setLinkingId(null);setSearchQ("");}} style={{...S.btn2,fontSize:12,padding:"5px 12px"}}>Cancel</button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
         </div>
-      ))}
+      </div>
+    );
+  };
+
+  // ── WEEK GRID ────────────────────────────────────────────────────────────────
+  const weekLabel = `${weekStart.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${weekDays[6].toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 120px)",minHeight:600}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <h1 style={{margin:0,fontSize:22,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>📅 {weekLabel}</h1>
+          {loading&&<span style={{fontSize:12,color:D.textMuted,animation:"pulse 1s infinite"}}>Syncing…</span>}
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <button onClick={goToday} style={{...S.btnSm,fontSize:12}}>Today</button>
+          <button onClick={prevWeek} style={{...S.btnSm,fontSize:14,padding:"5px 10px"}}>‹</button>
+          <button onClick={nextWeek} style={{...S.btnSm,fontSize:14,padding:"5px 10px"}}>›</button>
+          <button onClick={fetchEvents} style={{...S.btnSm,fontSize:12}} disabled={loading}>⟳</button>
+        </div>
+      </div>
+
+      {/* Body: month mini + week grid */}
+      <div style={{display:"flex",gap:20,flex:1,minHeight:0}}>
+        {/* Left: month mini */}
+        <MonthMini/>
+
+        {/* Right: week grid */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
+          {/* Day headers */}
+          <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)",borderBottom:`1px solid ${D.border}`,flexShrink:0}}>
+            <div/>
+            {weekDays.map((d,i)=>{
+              const isToday2 = d.getTime()===todayDate.getTime();
+              return(
+                <div key={i} style={{textAlign:"center",padding:"6px 4px",borderLeft:`1px solid ${D.border}`}}>
+                  <div style={{fontSize:11,color:D.textMuted,fontWeight:500}}>{d.toLocaleDateString("en-US",{weekday:"short"}).toUpperCase()}</div>
+                  <div style={{width:26,height:26,borderRadius:"50%",background:isToday2?D.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",margin:"2px auto 0",fontSize:13,fontWeight:isToday2?700:400,color:isToday2?"#fff":D.text}}>
+                    {d.getDate()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Scrollable time grid */}
+          <div ref={gridRef} style={{flex:1,overflowY:"auto",position:"relative"}}>
+            <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)",position:"relative"}}>
+              {/* Hour rows */}
+              {HOURS.map(h=>(
+                <React.Fragment key={h}>
+                  <div style={{height:56,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:8,paddingTop:2,fontSize:10,color:D.textMuted,flexShrink:0}}>
+                    {h>0?fmtHour(h):""}
+                  </div>
+                  {weekDays.map((d,di)=>{
+                    const isToday2 = d.getTime()===todayDate.getTime();
+                    return(
+                      <div key={di} style={{height:56,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isToday2?"#0D1828":"transparent"}}>
+                        {/* Render events that START in this hour slot */}
+                        {eventsForDay(d).filter(ev=>{
+                          const dt=new Date(ev.start?.dateTime||ev.start?.date);
+                          return dt.getHours()===h;
+                        }).map(ev=>{
+                          const {top,height,color}=evStyle(ev);
+                          const linkedId=calLinks[ev.id];
+                          const linked=linkedId?contacts.find(c=>c.id===linkedId):null;
+                          const topInSlot=top-(h*56);
+                          return(
+                            <div key={ev.id} onClick={()=>setSelectedEv(ev===selectedEv?null:ev)}
+                              style={{position:"absolute",left:2,right:2,top:topInSlot,height,background:color+"33",border:`1.5px solid ${color}`,borderRadius:5,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"2px 5px"}}>
+                              <div style={{fontSize:10,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
+                                {ev.summary||"(No title)"}
+                              </div>
+                              {height>30&&<div style={{fontSize:9,color:color+"cc"}}>{fmtTime(ev.start?.dateTime)}</div>}
+                              {linked&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>🔗 {linked.name}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Event detail popup */}
+      {selectedEv&&(()=>{
+        const ev=selectedEv;
+        const linkedId=calLinks[ev.id];
+        const linked=linkedId?contacts.find(c=>c.id===linkedId):null;
+        const color=calColor(ev.summary||"event");
+        const [showLink,setShowLink]=useState(false);
+        const [sq,setSq]=useState("");
+        return(
+          <div style={{position:"fixed",bottom:24,right:24,width:300,background:D.card,border:`1.5px solid ${color}55`,borderRadius:14,padding:18,zIndex:50,boxShadow:"0 8px 32px rgba(0,0,0,0.5)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+              <div style={{flex:1,paddingRight:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:color,flexShrink:0}}/>
+                  <span style={{fontWeight:700,fontSize:14,color:D.text}}>{ev.summary||"(No title)"}</span>
+                </div>
+                <div style={{fontSize:12,color:D.textSub}}>{fmtTime(ev.start?.dateTime)} – {fmtTime(ev.end?.dateTime)}</div>
+                {ev.location&&<div style={{fontSize:12,color:D.textMuted,marginTop:3}}>📍 {ev.location}</div>}
+                {ev.numAttendees>0&&<div style={{fontSize:12,color:D.textMuted,marginTop:2}}>👥 {ev.numAttendees} attendees</div>}
+              </div>
+              <button onClick={()=>{setSelectedEv(null);setShowLink(false);}} style={{background:"none",border:"none",color:D.textMuted,cursor:"pointer",fontSize:20,lineHeight:1,padding:0}}>×</button>
+            </div>
+
+            {linked?(
+              <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,background:"#0D1828",border:`1px solid ${D.border}`,marginBottom:10}}>
+                <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>
+                  {linked.name.charAt(0).toUpperCase()}
+                </div>
+                <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{linked.name}</span>
+                <button onClick={()=>{ setCalLinks(p=>{const n={...p};delete n[ev.id];return n;}); }} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
+              </div>
+            ):(
+              <button onClick={()=>setShowLink(v=>!v)} style={{...S.btnSm,fontSize:12,color:D.accent,borderColor:D.accent+"66",width:"100%",marginBottom:10}}>
+                🔗 Link to Contact
+              </button>
+            )}
+
+            {showLink&&(
+              <div style={{background:D.surface,borderRadius:8,border:`1px solid ${D.border}`,overflow:"hidden",marginBottom:8}}>
+                <input autoFocus value={sq} onChange={e=>setSq(e.target.value)} placeholder="Search contacts…"
+                  style={{...S.inp,padding:"6px 10px",fontSize:12,borderRadius:0,border:"none",borderBottom:`1px solid ${D.border}`}}/>
+                <div style={{maxHeight:150,overflowY:"auto"}}>
+                  {contacts.filter(c=>!c.cold&&(c.name.toLowerCase().includes(sq.toLowerCase())||(c.company||"").toLowerCase().includes(sq.toLowerCase()))).map(c=>(
+                    <div key={c.id} onClick={()=>{ setCalLinks(p=>({...p,[ev.id]:c.id})); setShowLink(false); setSq(""); }}
+                      style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",cursor:"pointer",borderBottom:`1px solid ${D.border}`}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#1A2535"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#fff",flexShrink:0}}>
+                        {c.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span style={{fontSize:12,color:D.text}}>{c.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {ev.htmlLink&&<a href={ev.htmlLink} target="_blank" rel="noreferrer" style={{fontSize:12,color:D.accent,textDecoration:"none"}}>Open in Google Calendar ↗</a>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1204,7 +1307,7 @@ function App() {
         <button onClick={()=>setShowSettings(true)} style={{background:D.card,border:`1px solid ${D.border}`,borderRadius:7,padding:"5px 12px",fontSize:13,color:D.textSub,cursor:"pointer",fontFamily:"inherit"}}>⚙ Settings</button>
       </div>
 
-      <div style={{maxWidth:740,margin:"0 auto",padding:"30px 20px"}}>
+      <div style={{maxWidth: view==="calendar" ? "100%" : 740, margin:"0 auto",padding:"30px 20px"}}>
         {view==="contacts"  &&<ContactList/>}
         {view==="dashboard" &&<Dashboard contacts={contacts} followups={followups} setFollowups={setFollowups} setSelected={setSelected} setView={setView}/>}
         {view==="cold"      &&<ColdView contacts={contacts} setSelected={setSelected} setView={setView} onRevive={onRevive}/>}
