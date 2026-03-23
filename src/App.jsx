@@ -229,10 +229,44 @@ function InfoRow({ label, value, link }) {
   );
 }
 
-function PipelineBar({ stageCounts, filterStage, setFilterStage }) {
+function PipelineBar({ stageCounts, filterStage, setFilterStage, totalContacts, urgentCount, coldCount, coldDueCount, onTabClick }) {
   return(
     <div style={{...S.card}}>
       <p style={{margin:"0 0 12px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Pipeline Overview</p>
+
+      {/* Summary stat boxes */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
+        {/* Total Contacts */}
+        <button onClick={()=>onTabClick("contacts")}
+          style={{background:"#0D1828",border:`1.5px solid #2E4060`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
+          <div style={{fontSize:18,lineHeight:1,marginBottom:5}}>👥</div>
+          <div style={{fontSize:10,fontWeight:600,color:D.textSub,whiteSpace:"nowrap"}}>Contacts</div>
+          <div style={{fontSize:22,fontWeight:700,color:D.text,lineHeight:1.3,marginTop:3}}>{totalContacts}</div>
+        </button>
+
+        {/* Follow-ups */}
+        <button onClick={()=>onTabClick("dashboard")}
+          style={{background: urgentCount>0?"#1A0D00":"#0D1828",border:`1.5px solid ${urgentCount>0?D.red+"66":"#2E4060"}`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center",position:"relative"}}>
+          <div style={{fontSize:18,lineHeight:1,marginBottom:5}}>📅</div>
+          <div style={{fontSize:10,fontWeight:600,color:urgentCount>0?D.red:D.textSub,whiteSpace:"nowrap"}}>Follow-ups</div>
+          <div style={{fontSize:22,fontWeight:700,color:urgentCount>0?D.red:D.text,lineHeight:1.3,marginTop:3}}>{urgentCount}</div>
+          {urgentCount>0&&<div style={{fontSize:9,color:D.red,marginTop:1}}>urgent</div>}
+        </button>
+
+        {/* Cold */}
+        <button onClick={()=>onTabClick("cold")}
+          style={{background: coldDueCount>0?"#0A1018":"#0D1828",border:`1.5px solid ${coldDueCount>0?"#2A5A78":"#2E4060"}`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
+          <div style={{fontSize:18,lineHeight:1,marginBottom:5}}>❄️</div>
+          <div style={{fontSize:10,fontWeight:600,color:coldDueCount>0?"#7AB8D4":D.textSub,whiteSpace:"nowrap"}}>Cold</div>
+          <div style={{fontSize:22,fontWeight:700,color:coldDueCount>0?"#7AB8D4":D.text,lineHeight:1.3,marginTop:3}}>{coldCount}</div>
+          {coldDueCount>0&&<div style={{fontSize:9,color:"#7AB8D4",marginTop:1}}>{coldDueCount} due</div>}
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div style={{height:1,background:D.border,marginBottom:12}}/>
+
+      {/* Pipeline stage boxes */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
         {STAGES.map((st,i)=>{
           const m=STAGE_META[st]; const active=filterStage===st;
@@ -1232,7 +1266,10 @@ function App() {
     return(<span style={{fontSize:12,color,display:"flex",alignItems:"center",gap:5}}><span style={{width:7,height:7,borderRadius:"50%",background:color,display:"inline-block",animation:syncState==="syncing"?"pulse 1s infinite":""}}/>{label}</span>);
   };
 
-  const ContactList=()=>(
+  const ContactList=()=>{
+    const coldDueCount = contacts.filter(c=>c.cold && c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)<=0).length;
+    const onTabClick = (t) => { setTab(t); setView(t); };
+    return(
     <div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
         <div>
@@ -1241,7 +1278,12 @@ function App() {
         </div>
         <button onClick={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} style={S.btn1}>+ Add Contact</button>
       </div>
-      <PipelineBar stageCounts={stageCounts} filterStage={filterStage} setFilterStage={setFilterStage}/>
+      <PipelineBar stageCounts={stageCounts} filterStage={filterStage} setFilterStage={setFilterStage}
+        totalContacts={activeContacts.length}
+        urgentCount={urgentCount}
+        coldCount={contacts.filter(c=>c.cold).length}
+        coldDueCount={coldDueCount}
+        onTabClick={onTabClick}/>
       <div style={{display:"flex",gap:10,marginBottom:18}}>
         <input placeholder="Search contacts…" value={search} onChange={e=>setSearch(e.target.value)}
           style={{flex:1,padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text}}/>
