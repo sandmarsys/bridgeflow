@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-const STORAGE_KEY  = "bf-contacts-v3";
-const FOLLOWUP_KEY = "bf-followups-v3";
+const STORAGE_KEY    = "bf-contacts-v3";
+const FOLLOWUP_KEY   = "bf-followups-v3";
+const CAL_LINKS_KEY  = "bf-cal-links-v1"; // maps eventId -> contactId
 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzLG432E6Hd9kyzbKW_g0mPh29ZAOoLLw0uo2XpbTrnUEg0rxzpuPJhDOwd-SaOimXT/exec";
 
@@ -413,6 +414,226 @@ function ColdStatusCard({ contact, onRevive }) {
         style={{background:D.accent,border:"none",borderRadius:7,padding:"8px 16px",fontSize:13,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
         🔗 Revive — Move back to Connection
       </button>
+    </div>
+  );
+}
+
+// ── CALENDAR VIEW ─────────────────────────────────────────────────────────────
+function CalendarView({ contacts }) {
+  const [events,      setEvents]      = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [calLinks,    setCalLinks]    = useState(()=>{ try{ return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}"); }catch{ return {}; }});
+  const [linkingId,   setLinkingId]   = useState(null); // eventId being linked
+  const [searchQ,     setSearchQ]     = useState("");
+
+  useEffect(()=>{ localStorage.setItem(CAL_LINKS_KEY, JSON.stringify(calLinks)); }, [calLinks]);
+
+  const fetchEvents = useCallback(async()=>{
+    setLoading(true); setError(null);
+    try {
+      const now   = new Date();
+      const end   = new Date(); end.setDate(end.getDate()+7);
+      const fmt   = d => d.toISOString().replace("Z","").split(".")[0];
+      const res   = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          tools:[{
+            type:"mcp_1",
+            name:"gcal_list_events",
+            url:"https://gcal.mcp.claude.com/mcp",
+            input:{
+              calendarId:"primary",
+              timeMin:fmt(now),
+              timeMax:fmt(end),
+              timeZone:"America/New_York",
+              condenseEventDetails:false,
+              maxResults:50
+            }
+          }],
+          messages:[{role:"user",content:"List my calendar events for the next 7 days. Return only the raw JSON tool result, no commentary."}]
+        })
+      });
+      const data = await res.json();
+      // Extract mcp_tool_result blocks
+      const resultBlock = (data.content||[]).find(b=>b.type==="mcp_tool_result");
+      const textBlock   = (data.content||[]).find(b=>b.type==="text");
+      let raw = resultBlock?.content?.[0]?.text || textBlock?.text || "{}";
+      try {
+        const parsed = JSON.parse(raw);
+        const evts   = parsed.events || [];
+        setEvents(Array.isArray(evts) ? evts : []);
+      } catch {
+        // Try to pull events from text response directly
+        setEvents([]);
+      }
+    } catch(e) { setError("Could not load calendar. Check your connection."); }
+    finally { setLoading(false); }
+  },[]);
+
+  useEffect(()=>{ fetchEvents(); },[]);
+
+  const linkContact = (eventId, contactId) => {
+    setCalLinks(prev=>({...prev,[eventId]:contactId}));
+    setLinkingId(null);
+  };
+  const unlinkContact = (eventId) => {
+    setCalLinks(prev=>{ const n={...prev}; delete n[eventId]; return n; });
+  };
+
+  const formatEventTime = (ev) => {
+    if (ev.allDay) return "All day";
+    const s = ev.start?.dateTime;
+    const e = ev.end?.dateTime;
+    if (!s) return "";
+    const opts = {hour:"numeric",minute:"2-digit",hour12:true};
+    const start = new Date(s).toLocaleTimeString("en-US",opts);
+    const end   = e ? new Date(e).toLocaleTimeString("en-US",opts) : "";
+    return end ? `${start} – ${end}` : start;
+  };
+
+  const formatEventDay = (ev) => {
+    const d = ev.start?.dateTime || ev.start?.date;
+    if (!d) return "";
+    const dt = new Date(d);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const tom   = new Date(today); tom.setDate(tom.getDate()+1);
+    dt.setHours(0,0,0,0);
+    if (dt.getTime()===today.getTime()) return "Today";
+    if (dt.getTime()===tom.getTime())   return "Tomorrow";
+    return dt.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+  };
+
+  // Group events by day label
+  const grouped = events.reduce((acc,ev)=>{
+    const day = formatEventDay(ev);
+    if (!acc[day]) acc[day]=[];
+    acc[day].push(ev);
+    return acc;
+  },{});
+
+  const dayOrder = Object.keys(grouped);
+
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
+        <div>
+          <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>📅 Calendar</h1>
+          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>Next 7 days · {events.length} event{events.length!==1?"s":""}</p>
+        </div>
+        <button onClick={fetchEvents} style={{...S.btnSm,display:"flex",alignItems:"center",gap:6}} disabled={loading}>
+          {loading?"⟳ Loading…":"⟳ Refresh"}
+        </button>
+      </div>
+
+      {error&&(
+        <div style={{background:"#1A0808",border:`1px solid #5C1A1A`,borderRadius:10,padding:"12px 16px",marginBottom:18,color:"#FCA5A5",fontSize:13}}>{error}</div>
+      )}
+
+      {loading&&!error&&(
+        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
+          <div style={{fontSize:32,marginBottom:10,animation:"pulse 1s infinite"}}>📅</div>
+          <p style={{fontSize:14}}>Loading your calendar…</p>
+        </div>
+      )}
+
+      {!loading&&!error&&events.length===0&&(
+        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
+          <div style={{fontSize:40,marginBottom:10}}>✅</div>
+          <p style={{fontSize:14}}>No events in the next 7 days.</p>
+          <p style={{fontSize:13,marginTop:4}}>Meetings booked via your Tydical link will appear here automatically.</p>
+        </div>
+      )}
+
+      {!loading&&dayOrder.map(day=>(
+        <div key={day} style={{marginBottom:24}}>
+          <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:D.textSub,textTransform:"uppercase",letterSpacing:0.8}}>{day}</p>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {grouped[day].map(ev=>{
+              const linkedId  = calLinks[ev.id];
+              const linked    = linkedId ? contacts.find(c=>c.id===linkedId) : null;
+              const isLinking = linkingId===ev.id;
+              const m         = linked ? (STAGE_META[linked.stage]||STAGE_META.Connection) : null;
+              return(
+                <div key={ev.id} style={{background:D.card,border:`1.5px solid ${linked?m.dot+"66":D.border}`,borderRadius:12,padding:"14px 16px"}}>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                        <span style={{fontWeight:600,fontSize:15,color:D.text}}>{ev.summary||"(No title)"}</span>
+                        {linked&&<StageBadge stage={linked.stage}/>}
+                      </div>
+                      <div style={{fontSize:13,color:D.textSub,marginBottom:linked||ev.numAttendees>1?6:0}}>
+                        🕐 {formatEventTime(ev)}
+                        {ev.location&&<span style={{marginLeft:10}}>📍 {ev.location}</span>}
+                      </div>
+                      {ev.numAttendees>1&&<div style={{fontSize:12,color:D.textMuted}}>👥 {ev.numAttendees} attendees</div>}
+                      {linked&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,padding:"6px 10px",borderRadius:8,background:m.bg,border:`1px solid ${m.dot}33`,width:"fit-content"}}>
+                          <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>
+                            {linked.name.charAt(0).toUpperCase()}
+                          </div>
+                          <span style={{fontSize:13,fontWeight:600,color:m.text}}>{linked.name}</span>
+                          {linked.company&&<span style={{fontSize:12,color:D.textMuted}}>· {linked.company}</span>}
+                          <button onClick={()=>unlinkContact(ev.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0,marginLeft:4,lineHeight:1}}>×</button>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{flexShrink:0}}>
+                      {ev.htmlLink&&(
+                        <a href={ev.htmlLink} target="_blank" rel="noreferrer"
+                          style={{...S.btnSm,display:"inline-block",textDecoration:"none",marginBottom:6,fontSize:12}}>
+                          Open ↗
+                        </a>
+                      )}
+                      <button onClick={()=>setLinkingId(isLinking?null:ev.id)}
+                        style={{...S.btnSm,display:"block",fontSize:12,color:linked?D.textMuted:D.accent,borderColor:linked?D.border:D.accent+"66",width:"100%"}}>
+                        {linked?"Relink":"🔗 Link"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Link contact dropdown */}
+                  {isLinking&&(
+                    <div style={{marginTop:12,background:D.surface,borderRadius:8,border:`1px solid ${D.border}`,overflow:"hidden"}}>
+                      <div style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`}}>
+                        <input autoFocus value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+                          placeholder="Search contacts…"
+                          style={{...S.inp,padding:"6px 10px",fontSize:13}}/>
+                      </div>
+                      <div style={{maxHeight:200,overflowY:"auto"}}>
+                        {contacts.filter(c=>!c.cold&&(c.name.toLowerCase().includes(searchQ.toLowerCase())||(c.company||"").toLowerCase().includes(searchQ.toLowerCase()))).map(c=>(
+                          <div key={c.id} onClick={()=>{ linkContact(ev.id,c.id); setSearchQ(""); }}
+                            style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",cursor:"pointer",borderBottom:`1px solid ${D.border}`}}
+                            onMouseEnter={e=>e.currentTarget.style.background="#1A2535"}
+                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <div style={{width:28,height:28,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0}}>
+                              {c.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{fontSize:13,fontWeight:600,color:D.text}}>{c.name}</div>
+                              {c.company&&<div style={{fontSize:12,color:D.textMuted}}>{c.company}</div>}
+                            </div>
+                            <StageBadge stage={c.stage}/>
+                          </div>
+                        ))}
+                        {contacts.filter(c=>!c.cold&&c.name.toLowerCase().includes(searchQ.toLowerCase())).length===0&&(
+                          <p style={{padding:"12px",fontSize:13,color:D.textMuted,margin:0}}>No contacts found</p>
+                        )}
+                      </div>
+                      <div style={{padding:"8px 12px",borderTop:`1px solid ${D.border}`}}>
+                        <button onClick={()=>{setLinkingId(null);setSearchQ("");}} style={{...S.btn2,fontSize:12,padding:"5px 12px"}}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -965,13 +1186,13 @@ function App() {
       <div style={{background:D.surface,borderBottom:`1px solid ${D.border}`,padding:"0 20px",display:"flex",alignItems:"center",height:52,gap:12}}>
         <span style={{fontSize:18,fontWeight:700,color:D.text,letterSpacing:"-0.3px"}}>BridgeFlow</span>
         <div style={{display:"flex",gap:2,background:D.card,borderRadius:8,padding:3,marginLeft:8}}>
-          {[["contacts","👥 Contacts"],["dashboard","📅 Follow-ups"],["cold","❄️ Cold"]].map(([t,label])=>{
+          {[["contacts","👥 Contacts"],["dashboard","📅 Follow-ups"],["cold","❄️ Cold"],["calendar","📅 Calendar"]].map(([t,label])=>{
             const badge = t==="dashboard" ? urgentCount
               : t==="cold" ? contacts.filter(c=>c.cold && c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)<=0).length
               : 0;
             return(
-            <button key={t} onClick={()=>{setTab(t);setView(t==="contacts"?"contacts":t==="dashboard"?"dashboard":"cold");}}
-              style={{padding:"4px 12px",borderRadius:6,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t?600:400,background:tab===t?D.accent:"transparent",color:tab===t?"#fff":D.textSub,border:"none",display:"flex",alignItems:"center",gap:5}}>
+            <button key={t} onClick={()=>{setTab(t);setView(t==="contacts"?"contacts":t==="dashboard"?"dashboard":t==="cold"?"cold":"calendar");}}
+            style={{padding:"4px 12px",borderRadius:6,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t?600:400,background:tab===t?D.accent:"transparent",color:tab===t?"#fff":D.textSub,border:"none",display:"flex",alignItems:"center",gap:5}}>
               {label}
               {badge>0&&<span style={{background:t==="cold"?"#1A3A50":D.red,color:t==="cold"?"#7AB8D4":"#fff",borderRadius:20,fontSize:11,fontWeight:700,padding:"0 5px",lineHeight:"16px"}}>{badge}</span>}
             </button>
@@ -987,6 +1208,7 @@ function App() {
         {view==="contacts"  &&<ContactList/>}
         {view==="dashboard" &&<Dashboard contacts={contacts} followups={followups} setFollowups={setFollowups} setSelected={setSelected} setView={setView}/>}
         {view==="cold"      &&<ColdView contacts={contacts} setSelected={setSelected} setView={setView} onRevive={onRevive}/>}
+        {view==="calendar"  &&<CalendarView contacts={contacts}/>}
         {view==="detail"    &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive}/>}
         {view==="add"       &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView}/>}
       </div>
