@@ -1266,10 +1266,65 @@ function App() {
     return(<span style={{fontSize:12,color,display:"flex",alignItems:"center",gap:5}}><span style={{width:7,height:7,borderRadius:"50%",background:color,display:"inline-block",animation:syncState==="syncing"?"pulse 1s infinite":""}}/>{label}</span>);
   };
 
-  const ContactList=()=>{
+  const ContactList = () => {
     const coldDueCount = contacts.filter(c=>c.cold && c.coldFollowUpDate && daysBetween(c.coldFollowUpDate)<=0).length;
     const onTabClick = (t) => { setTab(t); setView(t); };
-    return(
+    return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
+        <div>
+          <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Contacts</h1>
+          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{activeContacts.length} active · {contacts.filter(c=>c.cold).length} cold</p>
+        </div>
+        <button onClick={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} style={S.btn1}>+ Add Contact</button>
+      </div>
+      <PipelineBar stageCounts={stageCounts} filterStage={filterStage} setFilterStage={setFilterStage}
+        totalContacts={activeContacts.length}
+        urgentCount={urgentCount}
+        coldCount={contacts.filter(c=>c.cold).length}
+        coldDueCount={coldDueCount}
+        onTabClick={onTabClick}/>
+      <div style={{display:"flex",gap:10,marginBottom:18}}>
+        <input placeholder="Search contacts…" value={search} onChange={e=>setSearch(e.target.value)}
+          style={{flex:1,padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text}}/>
+        {filterStage!=="All"&&<button onClick={()=>setFilterStage("All")} style={{...S.btnSm,color:D.textMuted}}>Clear ×</button>}
+      </div>
+      {filtered.length===0?(
+        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
+          <div style={{fontSize:40,marginBottom:10}}>👥</div>
+          <p style={{fontSize:14}}>{search?"No contacts found":"Add your first contact to get started"}</p>
+        </div>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {filtered.map(c=>{
+            const u=getUrgency(c);
+            return(
+              <div key={c.id} onClick={()=>{setSelected(c);setView("detail");}}
+                style={{background:D.card,border:`1.5px solid ${u&&u.level==="overdue"?D.red+"55":u&&u.level==="today"?"#F9731655":D.border}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13}}>
+                <div style={{width:40,height:40,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:700,color:"#fff"}}>
+                  {c.name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontWeight:600,fontSize:15,color:D.text}}>{c.name}</span>
+                    <StageBadge stage={c.stage}/>
+                  </div>
+                  <div style={{fontSize:13,color:D.textSub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {[c.company,c.email].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  {u&&<UrgencyBadge contact={c}/>}
+                  {(c.conversations?.length||0)>0&&<div style={{fontSize:12,color:D.textMuted,marginTop:4}}>{c.conversations.length} note{c.conversations.length>1?"s":""}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+    );
+  };
     <div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
         <div>
