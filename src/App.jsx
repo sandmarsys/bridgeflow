@@ -463,7 +463,13 @@ function CalendarView({contacts}){
   };
 
   const openNew=(date="",startTime="")=>{
-    setNewEv({...emptyNewEv(),date,startTime});
+    // Calculate end time as start + 1 hour properly
+    const endTime = startTime ? (()=>{
+      const [hh,mm] = startTime.split(":");
+      const endHour = (parseInt(hh)+1)%24;
+      return String(endHour).padStart(2,"0")+":"+mm;
+    })() : "10:00";
+    setNewEv({...emptyNewEv(),date,startTime,endTime});
     setEvErr("");setShowNew(true);
   };
 
