@@ -483,12 +483,21 @@ function CalendarView({contacts}){
 
   const eventsForDay=day=>{
     const ds=day.toISOString().split("T")[0];
-    return events.filter(ev=>(ev.start?.dateTime||ev.start?.date||"").startsWith(ds));
+    return events.filter(ev=>{
+      const raw=ev.start?.dateTime||ev.start?.date||"";
+      const evDate=new Date(raw);
+      const evDs=evDate.toLocaleDateString("en-CA",{timeZone:"America/New_York"}); // YYYY-MM-DD in ET
+      return evDs===ds;
+    });
   };
   const evStyle=ev=>{
     const s=new Date(ev.start?.dateTime||ev.start?.date);
     const e=new Date(ev.end?.dateTime||ev.end?.date);
-    const sm=s.getHours()*60+s.getMinutes();const em=e.getHours()*60+e.getMinutes();
+    // Convert to local ET hours for positioning
+    const sET=new Date(s.toLocaleString("en-US",{timeZone:"America/New_York"}));
+    const eET=new Date(e.toLocaleString("en-US",{timeZone:"America/New_York"}));
+    const sm=sET.getHours()*60+sET.getMinutes();
+    const em=eET.getHours()*60+eET.getMinutes();
     return{top:(sm/60)*56,height:Math.max(((em-sm)/60)*56,22),color:calColor(ev.summary||"event")};
   };
   const fmtHour=h=>{const p=h<12?"AM":"PM";const hr=h===0?12:h>12?h-12:h;return`${hr} ${p}`;};
