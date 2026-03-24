@@ -672,6 +672,7 @@ function ColdView({ contacts, setSelected, setView }) {
 
   return(
     <div>
+      <button onClick={()=>setView("contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back to Pipeline</button>
       <div style={{marginBottom:24}}>
         <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.coldText,letterSpacing:"-0.5px"}}>❄️ Cold Check-ins</h1>
         <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{due.length} due now · {upcoming.length} upcoming · {cold.length} total</p>
@@ -743,6 +744,7 @@ function Dashboard({ contacts, followups, setSelected, setView }) {
 
   return(
     <div>
+      <button onClick={()=>setView("contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back to Pipeline</button>
       <div style={{marginBottom:24}}>
         <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Follow-up Dashboard</h1>
         <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{overdue.length+today.length} urgent · {soon.length} this week · {upcoming.length} upcoming</p>
