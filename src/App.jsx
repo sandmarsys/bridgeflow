@@ -4,7 +4,7 @@ const STORAGE_KEY   = "bf-contacts-v3";
 const FOLLOWUP_KEY  = "bf-followups-v3";
 const CAL_LINKS_KEY = "bf-cal-links-v1";
 
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzLG432E6Hd9kyzbKW_g0mPh29ZAOoLLw0uo2XpbTrnUEg0rxzpuPJhDOwd-SaOimXT/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyukMZkIN9kJLNX3Gg2L-xYZpudEFHEgvvCQK_RNQnn9yBdRZr1CCIyKfdOvncA00YjRg/exec";
 
 const STAGES = ["Connection","Conversation","Commitment","Client","Continuation"];
 const STAGE_META = {
@@ -441,32 +441,34 @@ function CalendarView({contacts}){
   useEffect(()=>{fetchEvents();},[fetchEvents]);
 
   // Create event via API
-  const createEvent=async()=>{
-    if(!newEv.title.trim()||!newEv.date||!newEv.startTime){setEvErr("Title, date and start time are required.");return;}
+  // Creates event silently via Apps Script — no new tab needed
+  const createEvent=async(local)=>{
+    if(!local.title.trim()||!local.date||!local.startTime){setEvErr("Title, date and start time are required.");return;}
     setSaving(true);setEvErr("");
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
+      const inviteesArr=local.invitees?local.invitees.split(",").map(s=>s.trim()).filter(Boolean):[];
+      const res=await fetch(APPS_SCRIPT_URL,{
+        method:"POST",
         body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:1000,
-          system:"You are a calendar assistant. Create the calendar event using the gcal_create_event tool. Confirm success briefly.",
-          mcp_servers:[{type:"url",url:"https://gcal.mcp.claude.com/mcp",name:"gcal"}],
-          messages:[{role:"user",content:`Create a Google Calendar event:
-Title: ${newEv.title}
-Date: ${newEv.date}
-Start: ${newEv.startTime}
-End: ${newEv.endTime||""}
-${newEv.invitees?`Invitees: ${newEv.invitees}`:""}
-${newEv.link?`Location/link: ${newEv.link}`:""}
-Timezone: America/New_York
-Calendar: primary`}]
+          action:"createEvent",
+          event:{
+            title:local.title,
+            date:local.date,
+            startTime:local.startTime,
+            endTime:local.endTime||"",
+            invitees:inviteesArr,
+            location:local.link||"",
+            description:"",
+          }
         })
       });
-      const data=await res.json();
-      const txt=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join(" ").toLowerCase();
-      if(txt.includes("error")||txt.includes("fail")){setEvErr("Could not create event. Try again.");}
-      else{setShowNew(false);setNewEv(emptyNewEv());fetchEvents();}
-    }catch{setEvErr("Connection error. Try again.");}
+      const json=await res.json();
+      if(!json.ok) throw new Error(json.error||"Failed to create event");
+      setShowNew(false);setNewEv(emptyNewEv());
+      setTimeout(()=>fetchEvents(),2000);
+    }catch(e){
+      setEvErr("Could not create event: "+e.message);
+    }
     setSaving(false);
   };
 
@@ -603,34 +605,9 @@ Calendar: primary`}]
     // Local state so typing is completely isolated — no re-renders from parent
     const [local, setLocal] = useState(newEv);
     const update=k=>e=>setLocal(p=>({...p,[k]:e.target.value}));
-    const handleCreate=async()=>{
+    const handleCreate=()=>{
       setNewEv(local);
-      if(!local.title.trim()||!local.date||!local.startTime){setEvErr("Title, date and start time are required.");return;}
-      setSaving(true);setEvErr("");
-      try{
-        const res=await fetch("https://api.anthropic.com/v1/messages",{
-          method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            model:"claude-sonnet-4-20250514",max_tokens:1000,
-            system:"You are a calendar assistant. Create the calendar event using the gcal_create_event tool. Confirm success briefly.",
-            mcp_servers:[{type:"url",url:"https://gcal.mcp.claude.com/mcp",name:"gcal"}],
-            messages:[{role:"user",content:`Create a Google Calendar event:
-Title: ${local.title}
-Date: ${local.date}
-Start: ${local.startTime}
-End: ${local.endTime||""}
-${local.invitees?`Invitees: ${local.invitees}`:""}
-${local.link?`Location/link: ${local.link}`:""}
-Timezone: America/New_York
-Calendar: primary`}]
-          })
-        });
-        const data=await res.json();
-        const txt=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join(" ").toLowerCase();
-        if(txt.includes("error")||txt.includes("fail")){setEvErr("Could not create event. Try again.");}
-        else{setShowNew(false);setNewEv(emptyNewEv());fetchEvents();}
-      }catch{setEvErr("Connection error. Try again.");}
-      setSaving(false);
+      createEvent(local);
     };
     return(
       <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
