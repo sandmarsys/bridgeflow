@@ -1157,8 +1157,8 @@ class RootErrorBoundary extends React.Component{
 function App(){
   const[contacts,    setContacts]    = useState([]);
   const[followups,   setFollowups]   = useState([]);
-  const[view,        setView]        = useState("contacts");
-  const[tab,         setTab]         = useState("contacts");
+  const[view,        setView]        = useState("home");
+  const[tab,         setTab]         = useState("home");
   const[selected,    setSelected]    = useState(null);
   const[search,      setSearch]      = useState("");
   const[filterStage, setFilterStage] = useState("All");
