@@ -417,7 +417,11 @@ function CalendarView({ contacts }) {
   const [events,    setEvents]    = useState([]);
   const [loading,   setLoading]   = useState(false);
   const [calLinks,  setCalLinks]  = useState(()=>{ try{ return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}"); }catch{ return {}; }});
-  const [selectedEv,setSelectedEv]= useState(null);
+  const [selectedEv, setSelectedEv] = useState(null);
+  const [newEvent,   setNewEvent]   = useState(null); // {date, startHour, startMin}
+  const [eventForm,  setEventForm]  = useState(null); // form state while creating
+  const [saving,     setSaving]     = useState(false);
+  const [saveMsg,    setSaveMsg]    = useState(null);
   const gridRef = useRef(null);
 
   useEffect(()=>{ localStorage.setItem(CAL_LINKS_KEY,JSON.stringify(calLinks)); },[calLinks]);
@@ -450,7 +454,78 @@ function CalendarView({ contacts }) {
 
   useEffect(()=>{ fetchEvents(); },[fetchEvents]);
 
-  const prevWeek=()=>{ const d=new Date(weekStart); d.setDate(d.getDate()-7); setWeekStart(d); };
+  // Open new event form when clicking a time slot
+  const openNewEvent = (day, hour) => {
+    const dateStr = day.toISOString().split("T")[0];
+    const startHour = hour;
+    const endHour   = Math.min(hour+1, 23);
+    setEventForm({
+      title:"", date:dateStr,
+      startTime:`${String(startHour).padStart(2,"0")}:00`,
+      endTime:`${String(endHour).padStart(2,"0")}:00`,
+      conferencing:"meet", // "meet" | "zoom" | "none"
+      participants:[], participantInput:"",
+      description:"",
+    });
+    setSelectedEv(null);
+  };
+
+  // Add participant chip
+  const addParticipant = () => {
+    if (!eventForm?.participantInput?.trim()) return;
+    const email = eventForm.participantInput.trim();
+    if (!eventForm.participants.includes(email)) {
+      setEventForm(f=>({...f, participants:[...f.participants, email], participantInput:""}));
+    } else {
+      setEventForm(f=>({...f, participantInput:""}));
+    }
+  };
+
+  // Save event to Google Calendar via Anthropic API
+  const saveNewEvent = async () => {
+    if (!eventForm?.title?.trim()) return;
+    setSaving(true); setSaveMsg(null);
+    try {
+      const startISO = `${eventForm.date}T${eventForm.startTime}:00`;
+      const endISO   = `${eventForm.date}T${eventForm.endTime}:00`;
+      const attendees = eventForm.participants.map(e=>({email:e}));
+
+      // Build conferencing request
+      let conferenceData = undefined;
+      if (eventForm.conferencing==="meet") {
+        conferenceData = { createRequest:{ requestId:`bf-${Date.now()}`, conferenceSolutionKey:{type:"hangoutsMeet"} } };
+      }
+
+      const body = {
+        summary:     eventForm.title,
+        description: eventForm.description||"",
+        start:       { dateTime:startISO, timeZone:"America/New_York" },
+        end:         { dateTime:endISO,   timeZone:"America/New_York" },
+        attendees,
+        ...(conferenceData ? { conferenceData } : {}),
+        ...(eventForm.conferencing==="zoom" ? { location:"Zoom — link will be added by host" } : {}),
+      };
+
+      const res = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:1000,
+          system:"You are a calendar assistant. Create the Google Calendar event using the gcal_create_event tool exactly as requested. Return only the raw JSON result.",
+          mcp_servers:[{type:"url",url:"https://gcal.mcp.claude.com/mcp",name:"gcal"}],
+          messages:[{role:"user",content:`Create a Google Calendar event with these exact details: ${JSON.stringify(body)}. Use calendarId "primary" and conferenceDataVersion 1. Return the created event JSON.`}]
+        })
+      });
+      const data = await res.json();
+      const tb = (data.content||[]).find(b=>b.type==="text");
+      const hasError = tb?.text?.toLowerCase().includes("error") || tb?.text?.toLowerCase().includes("failed");
+      if (hasError) throw new Error(tb?.text||"Unknown error");
+      setSaveMsg({type:"ok", text:"Event created! Invites sent to participants."});
+      setTimeout(()=>{ setEventForm(null); setSaveMsg(null); fetchEvents(); }, 2000);
+    } catch(e) {
+      setSaveMsg({type:"err", text:"Could not create event. Try again."});
+    }
+    setSaving(false);
+  };
   const nextWeek=()=>{ const d=new Date(weekStart); d.setDate(d.getDate()+7); setWeekStart(d); };
   const goToday =()=>{ setWeekStart(getWeekStart(new Date())); const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); setMonthBase(d); };
 
@@ -522,8 +597,116 @@ function CalendarView({ contacts }) {
     );
   };
 
-  // Event detail popup
-  const EventPopup=()=>{
+  // ── NEW MEETING FORM ────────────────────────────────────────────────────────
+  const NewEventForm = () => {
+    if (!eventForm) return null;
+    const f = eventForm;
+    return(
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <h2 style={{margin:0,fontSize:18,fontWeight:700,color:D.text}}>New Meeting</h2>
+            <button onClick={()=>setEventForm(null)} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
+          </div>
+
+          {/* Title */}
+          <div style={{marginBottom:14}}>
+            <label style={S.lbl}>Meeting Title *</label>
+            <input value={f.title} onChange={e=>setEventForm(p=>({...p,title:e.target.value}))}
+              placeholder="e.g. Discovery Call with James" style={S.inp} autoFocus/>
+          </div>
+
+          {/* Date & Time */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+            <div>
+              <label style={S.lbl}>Date</label>
+              <input type="date" value={f.date} onChange={e=>setEventForm(p=>({...p,date:e.target.value}))}
+                style={{...S.inp,colorScheme:"dark"}}/>
+            </div>
+            <div>
+              <label style={S.lbl}>Start</label>
+              <input type="time" value={f.startTime} onChange={e=>setEventForm(p=>({...p,startTime:e.target.value}))}
+                style={{...S.inp,colorScheme:"dark"}}/>
+            </div>
+            <div>
+              <label style={S.lbl}>End</label>
+              <input type="time" value={f.endTime} onChange={e=>setEventForm(p=>({...p,endTime:e.target.value}))}
+                style={{...S.inp,colorScheme:"dark"}}/>
+            </div>
+          </div>
+
+          {/* Conferencing */}
+          <div style={{marginBottom:14}}>
+            <label style={S.lbl}>Conferencing</label>
+            <div style={{display:"flex",gap:8}}>
+              {[["meet","🎥 Google Meet"],["zoom","🔵 Zoom"],["none","📵 No link"]].map(([val,label])=>(
+                <button key={val} onClick={()=>setEventForm(p=>({...p,conferencing:val}))}
+                  style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1.5px solid ${f.conferencing===val?D.accent:D.border}`,
+                    background:f.conferencing===val?"#0D1828":"transparent",
+                    color:f.conferencing===val?D.accent:D.textSub,
+                    cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:f.conferencing===val?600:400}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {f.conferencing==="meet"&&<p style={{margin:"6px 0 0",fontSize:11,color:D.textMuted}}>A Google Meet link will be generated automatically.</p>}
+            {f.conferencing==="zoom"&&<p style={{margin:"6px 0 0",fontSize:11,color:"#F59E0B"}}>⚠️ Zoom requires the Zoom add-on in your Google Calendar. The location field will note Zoom — add your link manually after creating.</p>}
+          </div>
+
+          {/* Participants */}
+          <div style={{marginBottom:14}}>
+            <label style={S.lbl}>Participants</label>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <input value={f.participantInput}
+                onChange={e=>setEventForm(p=>({...p,participantInput:e.target.value}))}
+                onKeyDown={e=>{ if(e.key==="Enter"||e.key===","){e.preventDefault();addParticipant();} }}
+                placeholder="email@example.com — press Enter to add"
+                style={{...S.inp,flex:1}}/>
+              <button onClick={addParticipant} style={{...S.btnSm,color:D.accent,borderColor:D.accent+"66",whiteSpace:"nowrap"}}>+ Add</button>
+            </div>
+            {f.participants.length>0&&(
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {f.participants.map(email=>(
+                  <span key={email} style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,background:"#0D1828",border:`1px solid ${D.border}`,fontSize:12,color:D.textSub}}>
+                    {email}
+                    <button onClick={()=>setEventForm(p=>({...p,participants:p.participants.filter(e=>e!==email)}))}
+                      style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0,lineHeight:1,marginLeft:2}}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {f.participants.length===0&&<p style={{fontSize:12,color:D.textMuted,margin:0}}>No participants yet — they'll receive a Google Calendar invite.</p>}
+          </div>
+
+          {/* Description */}
+          <div style={{marginBottom:20}}>
+            <label style={S.lbl}>Description (optional)</label>
+            <textarea value={f.description} onChange={e=>setEventForm(p=>({...p,description:e.target.value}))}
+              placeholder="Agenda, notes, or context…"
+              style={{...S.inp,height:60,resize:"none"}}/>
+          </div>
+
+          {/* Save message */}
+          {saveMsg&&(
+            <div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:13,fontWeight:500,
+              background:saveMsg.type==="ok"?"#0D2210":"#1A0808",
+              color:saveMsg.type==="ok"?"#86EFAC":"#FCA5A5",
+              border:`1px solid ${saveMsg.type==="ok"?"#166534":"#7F1D1D"}`}}>
+              {saveMsg.text}
+            </div>
+          )}
+
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={saveNewEvent} disabled={saving||!f.title.trim()}
+              style={{...S.btn1,opacity:saving||!f.title.trim()?0.6:1,flex:1}}>
+              {saving?"Creating…":"✅ Create & Send Invites"}
+            </button>
+            <button onClick={()=>setEventForm(null)} style={S.btn2}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
     const [showLink,setShowLink]=useState(false);
     const [sq,setSq]=useState("");
     if (!selectedEv) return null;
@@ -613,7 +796,10 @@ function CalendarView({ contacts }) {
                   {weekDays.map((d,di)=>{
                     const isTd=d.getTime()===todayDate.getTime();
                     return(
-                      <div key={di} style={{height:56,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent"}}>
+                      <div key={di} onClick={()=>openNewEvent(d,h)}
+                        style={{height:56,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}}
+                        onMouseEnter={e=>e.currentTarget.style.background=isTd?"#0D1E38":"#0D1220"}
+                        onMouseLeave={e=>e.currentTarget.style.background=isTd?"#0D1828":"transparent"}>
                         {eventsForDay(d).filter(ev=>new Date(ev.start?.dateTime||ev.start?.date).getHours()===h).map(ev=>{
                           const {top,height,color}=evStyle(ev);
                           const linked=calLinks[ev.id]?contacts.find(c=>c.id===calLinks[ev.id]):null;
@@ -636,6 +822,7 @@ function CalendarView({ contacts }) {
         </div>
       </div>
       <EventPopup/>
+      <NewEventForm/>
     </div>
   );
 }
