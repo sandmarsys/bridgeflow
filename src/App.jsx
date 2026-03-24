@@ -744,6 +744,128 @@ function CalendarView({contacts}){
   );
 }
 
+// ── HOME VIEW ─────────────────────────────────────────────────────────────────
+function HomeView({ contacts, followups, switchTab, setFilterStage }) {
+  const activeContacts = contacts.filter(c=>!c.cold);
+  const coldContacts   = contacts.filter(c=>c.cold);
+  const [upcomingEvs,  setUpcomingEvs]  = useState([]);
+  const [loadingEvs,   setLoadingEvs]   = useState(true);
+
+  const urgentCount = activeContacts.filter(c=>{ const u=getUrgency(c); return u&&(u.level==="overdue"||u.level==="today"); }).length
+    + followups.filter(f=>{ if(f.done||!f.date) return false; const u=getDateUrgency(f.date); return u.level==="overdue"||u.level==="today"; }).length;
+  const coldDueCount = coldContacts.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)<=0).length;
+  const stageCounts  = STAGES.reduce((a,s)=>({...a,[s]:activeContacts.filter(c=>c.stage===s).length}),{});
+
+  // Fetch next 7 days of events via Apps Script
+  useEffect(()=>{
+    const load=async()=>{
+      setLoadingEvs(true);
+      try{
+        const now=new Date();
+        const end=new Date();end.setDate(end.getDate()+7);
+        const fmt=d=>d.toISOString().split(".")[0];
+        const res=await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(now))+"&timeMax="+encodeURIComponent(fmt(end)));
+        const json=await res.json();
+        if(json.ok&&Array.isArray(json.events)) setUpcomingEvs(json.events.slice(0,4));
+        else setUpcomingEvs([]);
+      }catch{ setUpcomingEvs([]); }
+      setLoadingEvs(false);
+    };
+    load();
+  },[]);
+
+  const fmtEvTime=dt=>{
+    if(!dt) return"";
+    return new Date(dt).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
+  };
+
+  return(
+    <div>
+      {/* Greeting */}
+      <div style={{marginBottom:24}}>
+        <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>👋 Welcome back</h1>
+        <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>
+          {urgentCount>0?`You have ${urgentCount} urgent follow-up${urgentCount>1?"s":""} today`:"You're all caught up today 🎉"}
+        </p>
+      </div>
+
+      {/* Stat boxes */}
+      <div style={{...S.card}}>
+        <p style={{margin:"0 0 12px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Your Pipeline</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
+          <button onClick={()=>switchTab("contacts")} style={{background:"#0D1828",border:`1.5px solid #2E4060`,borderRadius:8,padding:"12px 8px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:20,marginBottom:4}}>👥</div>
+            <div style={{fontSize:10,fontWeight:600,color:D.textSub}}>Contacts</div>
+            <div style={{fontSize:26,fontWeight:700,color:D.text,lineHeight:1.3,marginTop:2}}>{activeContacts.length}</div>
+          </button>
+          <button onClick={()=>switchTab("dashboard")} style={{background:urgentCount>0?"#1A0D00":"#0D1828",border:`1.5px solid ${urgentCount>0?D.red+"66":"#2E4060"}`,borderRadius:8,padding:"12px 8px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:20,marginBottom:4}}>📅</div>
+            <div style={{fontSize:10,fontWeight:600,color:urgentCount>0?D.red:D.textSub}}>Follow-ups</div>
+            <div style={{fontSize:26,fontWeight:700,color:urgentCount>0?D.red:D.text,lineHeight:1.3,marginTop:2}}>{urgentCount}</div>
+            {urgentCount>0&&<div style={{fontSize:9,color:D.red,marginTop:1}}>urgent</div>}
+          </button>
+          <button onClick={()=>switchTab("cold")} style={{background:coldDueCount>0?"#0A1018":"#0D1828",border:`1.5px solid ${coldDueCount>0?"#2A5A78":"#2E4060"}`,borderRadius:8,padding:"12px 8px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:20,marginBottom:4}}>❄️</div>
+            <div style={{fontSize:10,fontWeight:600,color:coldDueCount>0?"#7AB8D4":D.textSub}}>Cold</div>
+            <div style={{fontSize:26,fontWeight:700,color:coldDueCount>0?"#7AB8D4":D.text,lineHeight:1.3,marginTop:2}}>{coldContacts.length}</div>
+            {coldDueCount>0&&<div style={{fontSize:9,color:"#7AB8D4",marginTop:1}}>{coldDueCount} due</div>}
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div style={{height:1,background:D.border,marginBottom:12}}/>
+
+        {/* Pipeline stages */}
+        <p style={{margin:"0 0 10px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Stages</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
+          {STAGES.map((st,i)=>{
+            const m=STAGE_META[st];
+            return(
+              <button key={st} onClick={()=>{ setFilterStage(st); switchTab("contacts"); }}
+                style={{position:"relative",background:"transparent",border:`1.5px solid ${D.border}`,borderRadius:8,padding:"10px 6px",cursor:"pointer",textAlign:"center",transition:"all .15s"}}
+                onMouseEnter={e=>{e.currentTarget.style.background=m.bg;e.currentTarget.style.borderColor=m.dot;}}
+                onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor=D.border;}}>
+                {i<STAGES.length-1&&<div style={{position:"absolute",right:-7,top:"50%",transform:"translateY(-50%)",color:D.textMuted,fontSize:14,zIndex:1,pointerEvents:"none"}}>›</div>}
+                <div style={{fontSize:18,marginBottom:4}}>{m.icon}</div>
+                <div style={{fontSize:10,fontWeight:600,color:D.textSub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{st}</div>
+                <div style={{fontSize:22,fontWeight:700,color:D.text,lineHeight:1.3,marginTop:2}}>{stageCounts[st]}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Upcoming calendar events */}
+      <div style={{...S.card}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <p style={{margin:0,fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Upcoming Events</p>
+          <button onClick={()=>switchTab("calendar")} style={{...S.btnSm,fontSize:11,padding:"3px 10px"}}>View Calendar →</button>
+        </div>
+        {loadingEvs&&<p style={{fontSize:13,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading…</p>}
+        {!loadingEvs&&upcomingEvs.length===0&&(
+          <p style={{fontSize:13,color:D.textMuted,margin:0}}>No upcoming events in the next 7 days.</p>
+        )}
+        {!loadingEvs&&upcomingEvs.length>0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {upcomingEvs.map(ev=>{
+              const color=["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#EF4444","#6366F1"][Math.abs(ev.summary?.split("").reduce((h,c)=>c.charCodeAt(0)+((h<<5)-h),0)||0)%8];
+              return(
+                <div key={ev.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:D.surface,border:`1px solid ${D.border}`}}>
+                  <div style={{width:3,height:36,borderRadius:2,background:color,flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.summary||"(No title)"}</div>
+                    <div style={{fontSize:11,color:D.textMuted,marginTop:2}}>{fmtEvTime(ev.start?.dateTime)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── COLD VIEW ─────────────────────────────────────────────────────────────────
 function ColdView({contacts,setSelected,setView}){
   const cold=contacts.filter(c=>c.cold);
@@ -1141,7 +1263,7 @@ function App(){
       <div style={{background:D.surface,borderBottom:`1px solid ${D.border}`,padding:"0 20px",display:"flex",alignItems:"center",height:52,gap:12}}>
         <span style={{fontSize:18,fontWeight:700,color:D.text,letterSpacing:"-0.3px"}}>BridgeFlow</span>
         <div style={{display:"flex",gap:2,background:D.card,borderRadius:8,padding:3,marginLeft:8}}>
-          {[["contacts","👥 Contacts",0],["dashboard","📅 Follow-ups",urgentCount],["cold","❄️ Cold",coldDueCount],["calendar","📅 Calendar",0]].map(([t,label,badge])=>(
+          {[["home","🏠 Home",0],["contacts","👥 Contacts",0],["dashboard","📅 Follow-ups",urgentCount],["cold","❄️ Cold",coldDueCount],["calendar","📅 Calendar",0]].map(([t,label,badge])=>(
             <button key={t} onClick={()=>switchTab(t)}
               style={{padding:"4px 12px",borderRadius:6,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t?600:400,background:tab===t?D.accent:"transparent",color:tab===t?"#fff":D.textSub,border:"none",display:"flex",alignItems:"center",gap:5}}>
               {label}
@@ -1155,6 +1277,7 @@ function App(){
       </div>
 
       <div style={{maxWidth:view==="calendar"?"100%":740,margin:"0 auto",padding:"30px 20px"}}>
+        {view==="home"     &&<HomeView contacts={contacts} followups={followups} switchTab={switchTab} setFilterStage={setFilterStage}/>}
         {view==="contacts"&&(
           <div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
@@ -1164,14 +1287,17 @@ function App(){
               </div>
               <button onClick={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} style={S.btn1}>+ Add Contact</button>
             </div>
-            <PipelineBar stageCounts={stageCounts} filterStage={filterStage} setFilterStage={setFilterStage}
-              totalContacts={activeContacts.length} urgentCount={urgentCount}
-              coldCount={coldContacts.length} coldDueCount={coldDueCount} onTabClick={switchTab}/>
             <div style={{display:"flex",gap:10,marginBottom:18}}>
               <input placeholder="Search contacts…" value={search} onChange={e=>setSearch(e.target.value)}
                 style={{flex:1,padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text}}/>
               {filterStage!=="All"&&<button onClick={()=>setFilterStage("All")} style={{...S.btnSm,color:D.textMuted}}>Clear ×</button>}
             </div>
+            {filterStage!=="All"&&(
+              <div style={{marginBottom:14,display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:12,color:D.textSub}}>Filtered by:</span>
+                <StageBadge stage={filterStage}/>
+              </div>
+            )}
             {filtered.length===0?(
               <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
                 <div style={{fontSize:40,marginBottom:10}}>👥</div>
