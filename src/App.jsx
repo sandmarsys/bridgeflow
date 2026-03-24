@@ -811,7 +811,7 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
       <div style={{...S.card}}>
         <p style={S.secH}>Contact Info</p>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 20px"}}>
-          {contact.email    &&<InfoRow label="Email"    value={contact.email}/>}
+          {contact.email    &&<InfoRow label="Email"    value={contact.email} link={`mailto:${contact.email}`}/>}
           {contact.phone    &&<InfoRow label="Phone"    value={contact.phone}/>}
           {contact.whatsapp &&<InfoRow label="WhatsApp" value={contact.whatsapp} link={`https://wa.me/${contact.whatsapp.replace(/\D/g,"")}`}/>}
           {contact.linkedin &&<InfoRow label="LinkedIn" value="View Profile" link={contact.linkedin.startsWith("http")?contact.linkedin:`https://${contact.linkedin}`}/>}
