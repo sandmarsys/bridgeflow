@@ -205,7 +205,7 @@ function InfoRow({ label, value, link }) {
 }
 
 // ── PIPELINE BAR ──────────────────────────────────────────────────────────────
-function PipelineBar({ stageCounts, filterStage, setFilterStage, totalContacts, urgentCount, coldCount, coldDueCount, onTabClick }) {
+function PipelineBar({ stageCounts, filterStage, setFilterStage, totalContacts, urgentCount, coldCount, coldDueCount, onTabClick, onStageClick }) {
   return(
     <div style={{...S.card}}>
       <p style={{margin:"0 0 12px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Pipeline Overview</p>
@@ -214,7 +214,7 @@ function PipelineBar({ stageCounts, filterStage, setFilterStage, totalContacts, 
         <button onClick={()=>onTabClick("contacts")}
           style={{background:"#0D1828",border:`1.5px solid #2E4060`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
           <div style={{fontSize:18,lineHeight:1,marginBottom:5}}>👥</div>
-          <div style={{fontSize:10,fontWeight:600,color:D.textSub}}>Contacts</div>
+          <div style={{fontSize:10,fontWeight:600,color:D.textSub}}>All Contacts</div>
           <div style={{fontSize:22,fontWeight:700,color:D.text,lineHeight:1.3,marginTop:3}}>{totalContacts}</div>
         </button>
         <button onClick={()=>onTabClick("dashboard")}
@@ -238,7 +238,7 @@ function PipelineBar({ stageCounts, filterStage, setFilterStage, totalContacts, 
         {STAGES.map((st,i)=>{
           const m=STAGE_META[st]; const active=filterStage===st;
           return(
-            <button key={st} onClick={()=>setFilterStage(active?"All":st)}
+            <button key={st} onClick={()=>onStageClick(st)}
               style={{position:"relative",background:active?m.bg:"transparent",border:`1.5px solid ${active?m.dot:D.border}`,borderRadius:8,padding:"10px 6px",cursor:"pointer",textAlign:"center"}}>
               {i<STAGES.length-1&&<div style={{position:"absolute",right:-7,top:"50%",transform:"translateY(-50%)",color:D.textMuted,fontSize:14,zIndex:1,pointerEvents:"none"}}>›</div>}
               <div style={{fontSize:18,lineHeight:1,marginBottom:5}}>{m.icon}</div>
@@ -772,7 +772,7 @@ function DetailView({ selected, contacts, followups, setFollowups, setContacts, 
   const stageIdx = STAGES.indexOf(contact.stage);
   return(
     <div>
-      <button onClick={()=>setView("contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back</button>
+      <button onClick={()=>setView("contactlist")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back</button>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:22}}>
         <div style={{display:"flex",gap:14,alignItems:"center"}}>
           <div style={{width:54,height:54,borderRadius:"50%",background:stringToColor(contact.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff",flexShrink:0,opacity:contact.cold?0.6:1}}>{contact.name.charAt(0).toUpperCase()}</div>
@@ -1075,7 +1075,7 @@ function App() {
           <div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
               <div>
-                <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Contacts</h1>
+                <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Pipeline</h1>
                 <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{activeContacts.length} active · {coldContacts.length} cold</p>
               </div>
               <button onClick={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} style={S.btn1}>+ Add Contact</button>
@@ -1084,17 +1084,43 @@ function App() {
               stageCounts={stageCounts} filterStage={filterStage} setFilterStage={setFilterStage}
               totalContacts={activeContacts.length} urgentCount={urgentCount}
               coldCount={coldContacts.length} coldDueCount={coldDueCount}
-              onTabClick={switchTab}
+              onTabClick={(t)=>{ if(t==="contacts"){setFilterStage("All");setSearch("");setView("contactlist");}else switchTab(t); }}
+              onStageClick={(st)=>{ setFilterStage(st); setSearch(""); setView("contactlist"); }}
             />
             <div style={{display:"flex",gap:10,marginBottom:18}}>
-              <input placeholder="Search contacts…" value={search} onChange={e=>setSearch(e.target.value)}
+              <input placeholder="Search contacts…" value={search} onChange={e=>{setSearch(e.target.value);if(e.target.value) setView("contactlist");}}
                 style={{flex:1,padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text}}/>
-              {filterStage!=="All"&&<button onClick={()=>setFilterStage("All")} style={{...S.btnSm,color:D.textMuted}}>Clear ×</button>}
+            </div>
+            {/* Hint text when no stage selected */}
+            <div style={{textAlign:"center",padding:"50px 20px",color:D.textMuted}}>
+              <div style={{fontSize:40,marginBottom:12}}>👆</div>
+              <p style={{fontSize:15,color:D.textSub,fontWeight:500}}>Select a stage or search to view contacts</p>
+              <p style={{fontSize:13,color:D.textMuted,marginTop:6}}>Click any stage box above to drill in, or use the search bar</p>
+            </div>
+          </div>
+        )}
+
+        {view==="contactlist"&&(
+          <div>
+            <button onClick={()=>{setView("contacts");setFilterStage("All");setSearch("");}} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back to Pipeline</button>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+              <div>
+                <h2 style={{margin:0,fontSize:22,fontWeight:700,color:D.text}}>
+                  {filterStage==="All" ? "All Contacts" : `${STAGE_META[filterStage]?.icon} ${filterStage}`}
+                </h2>
+                <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{filtered.length} contact{filtered.length!==1?"s":""}</p>
+              </div>
+              <button onClick={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} style={S.btn1}>+ Add Contact</button>
+            </div>
+            <div style={{display:"flex",gap:10,marginBottom:18}}>
+              <input placeholder="Search contacts…" value={search} onChange={e=>setSearch(e.target.value)} autoFocus
+                style={{flex:1,padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text}}/>
+              {(filterStage!=="All"||search)&&<button onClick={()=>{setFilterStage("All");setSearch("");}} style={{...S.btnSm,color:D.textMuted}}>Clear ×</button>}
             </div>
             {filtered.length===0?(
               <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
                 <div style={{fontSize:40,marginBottom:10}}>👥</div>
-                <p style={{fontSize:14}}>{search?"No contacts found":"Add your first contact to get started"}</p>
+                <p style={{fontSize:14}}>{search?"No contacts found":"No contacts in this stage yet"}</p>
               </div>
             ):(
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
