@@ -420,20 +420,10 @@ function CalendarView({contacts}){
     try{
       const end=new Date(weekStart);end.setDate(end.getDate()+7);
       const fmt=d=>d.toISOString().split(".")[0];
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:2000,
-          system:"You are a calendar assistant. When asked to list events, call the gcal_list_events tool and return ONLY the raw JSON from the tool result — no text, no markdown.",
-          mcp_servers:[{type:"url",url:"https://gcal.mcp.claude.com/mcp",name:"gcal"}],
-          messages:[{role:"user",content:`List all my Google Calendar events from ${fmt(weekStart)} to ${fmt(end)} in timezone America/New_York. Return only JSON.`}]
-        })
-      });
-      const data=await res.json();
-      const rb=(data.content||[]).find(b=>b.type==="mcp_tool_result");
-      const tb=(data.content||[]).find(b=>b.type==="text");
-      const raw=rb?.content?.[0]?.text||tb?.text||"{}";
-      try{const p=JSON.parse(raw);setEvents(Array.isArray(p.events)?p.events:[]);}catch{setEvents([]);}
+      const res=await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(weekStart))+"&timeMax="+encodeURIComponent(fmt(end)));
+      const json=await res.json();
+      if(json.ok&&Array.isArray(json.events)){setEvents(json.events);}
+      else{setEvents([]);}
     }catch{setEvents([]);}
     setLoading(false);
   },[weekStart]);
