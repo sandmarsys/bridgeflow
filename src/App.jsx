@@ -24,7 +24,7 @@ const D = {
   border:"#1E2D42", borderHi:"#2E4060",
   text:"#E8EEF7", textSub:"#6B82A0", textMuted:"#3A4F68",
   accent:"#3B82F6", green:"#22C55E", red:"#EF4444", yellow:"#F59E0B",
-  cold:"#1A1F2E", coldBorder:"#2A3A50", coldText:"#7A9BB5",
+  coldBorder:"#2A3A50", coldText:"#7A9BB5",
 };
 
 const S = {
@@ -69,7 +69,6 @@ function stringToColor(str){
   let h=0; for(let i=0;i<str.length;i++) h=str.charCodeAt(i)+((h<<5)-h);
   return c[Math.abs(h)%c.length];
 }
-
 function getCadenceDates(stageEnteredAt) {
   if (!stageEnteredAt) return [];
   return CADENCE_DAYS.map((d,i)=>({ label:CADENCE_LABELS[i], date:addDays(stageEnteredAt,d), day:d }));
@@ -182,10 +181,6 @@ function ColdBadge() {
     </span>
   );
 }
-function UrgencyBadge({ contact }) {
-  const u=getUrgency(contact); if(!u) return null;
-  return <RawUrgencyBadge u={u}/>;
-}
 function RawUrgencyBadge({ u }) {
   if (!u) return null;
   return(
@@ -193,6 +188,10 @@ function RawUrgencyBadge({ u }) {
       {u.level==="overdue"?"🔴":u.level==="today"?"🟠":u.level==="soon"?"🟡":"🔵"} {u.label}
     </span>
   );
+}
+function UrgencyBadge({ contact }) {
+  const u=getUrgency(contact); if(!u) return null;
+  return <RawUrgencyBadge u={u}/>;
 }
 function InfoRow({ label, value, link }) {
   return(
@@ -205,11 +204,10 @@ function InfoRow({ label, value, link }) {
 }
 
 // ── PIPELINE BAR ──────────────────────────────────────────────────────────────
-function PipelineBar({ stageCounts, filterStage, setFilterStage, totalContacts, urgentCount, coldCount, coldDueCount, onTabClick, onStageClick }) {
+function PipelineBar({ stageCounts, filterStage, totalContacts, urgentCount, coldCount, coldDueCount, onTabClick, onStageClick }) {
   return(
     <div style={{...S.card}}>
       <p style={{margin:"0 0 12px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Pipeline Overview</p>
-      {/* Summary stat boxes */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
         <button onClick={()=>onTabClick("contacts")}
           style={{background:"#0D1828",border:`1.5px solid #2E4060`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
@@ -233,7 +231,6 @@ function PipelineBar({ stageCounts, filterStage, setFilterStage, totalContacts, 
         </button>
       </div>
       <div style={{height:1,background:D.border,marginBottom:12}}/>
-      {/* Pipeline stages */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
         {STAGES.map((st,i)=>{
           const m=STAGE_META[st]; const active=filterStage===st;
@@ -412,14 +409,13 @@ function CalendarView({ contacts }) {
     const day=dt.getDay(); const diff=day===0?-6:1-day;
     dt.setDate(dt.getDate()+diff); return dt;
   };
-  const [weekStart, setWeekStart] = useState(()=>getWeekStart(new Date()));
-  const [monthBase, setMonthBase] = useState(()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
-  const [events,    setEvents]    = useState([]);
-  const [loading,   setLoading]   = useState(false);
-  const [calLinks,  setCalLinks]  = useState(()=>{ try{ return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}"); }catch{ return {}; }});
+  const [weekStart,  setWeekStart]  = useState(()=>getWeekStart(new Date()));
+  const [monthBase,  setMonthBase]  = useState(()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; });
+  const [events,     setEvents]     = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [calLinks,   setCalLinks]   = useState(()=>{ try{ return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}"); }catch{ return {}; }});
   const [selectedEv, setSelectedEv] = useState(null);
-  const [newEvent,   setNewEvent]   = useState(null); // {date, startHour, startMin}
-  const [eventForm,  setEventForm]  = useState(null); // form state while creating
+  const [eventForm,  setEventForm]  = useState(null);
   const [saving,     setSaving]     = useState(false);
   const [saveMsg,    setSaveMsg]    = useState(null);
   const gridRef = useRef(null);
@@ -454,78 +450,7 @@ function CalendarView({ contacts }) {
 
   useEffect(()=>{ fetchEvents(); },[fetchEvents]);
 
-  // Open new event form when clicking a time slot
-  const openNewEvent = (day, hour) => {
-    const dateStr = day.toISOString().split("T")[0];
-    const startHour = hour;
-    const endHour   = Math.min(hour+1, 23);
-    setEventForm({
-      title:"", date:dateStr,
-      startTime:`${String(startHour).padStart(2,"0")}:00`,
-      endTime:`${String(endHour).padStart(2,"0")}:00`,
-      conferencing:"meet", // "meet" | "zoom" | "none"
-      participants:[], participantInput:"",
-      description:"",
-    });
-    setSelectedEv(null);
-  };
-
-  // Add participant chip
-  const addParticipant = () => {
-    if (!eventForm?.participantInput?.trim()) return;
-    const email = eventForm.participantInput.trim();
-    if (!eventForm.participants.includes(email)) {
-      setEventForm(f=>({...f, participants:[...f.participants, email], participantInput:""}));
-    } else {
-      setEventForm(f=>({...f, participantInput:""}));
-    }
-  };
-
-  // Save event to Google Calendar via Anthropic API
-  const saveNewEvent = async () => {
-    if (!eventForm?.title?.trim()) return;
-    setSaving(true); setSaveMsg(null);
-    try {
-      const startISO = `${eventForm.date}T${eventForm.startTime}:00`;
-      const endISO   = `${eventForm.date}T${eventForm.endTime}:00`;
-      const attendees = eventForm.participants.map(e=>({email:e}));
-
-      // Build conferencing request
-      let conferenceData = undefined;
-      if (eventForm.conferencing==="meet") {
-        conferenceData = { createRequest:{ requestId:`bf-${Date.now()}`, conferenceSolutionKey:{type:"hangoutsMeet"} } };
-      }
-
-      const body = {
-        summary:     eventForm.title,
-        description: eventForm.description||"",
-        start:       { dateTime:startISO, timeZone:"America/New_York" },
-        end:         { dateTime:endISO,   timeZone:"America/New_York" },
-        attendees,
-        ...(conferenceData ? { conferenceData } : {}),
-        ...(eventForm.conferencing==="zoom" ? { location:"Zoom — link will be added by host" } : {}),
-      };
-
-      const res = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:1000,
-          system:"You are a calendar assistant. Create the Google Calendar event using the gcal_create_event tool exactly as requested. Return only the raw JSON result.",
-          mcp_servers:[{type:"url",url:"https://gcal.mcp.claude.com/mcp",name:"gcal"}],
-          messages:[{role:"user",content:`Create a Google Calendar event with these exact details: ${JSON.stringify(body)}. Use calendarId "primary" and conferenceDataVersion 1. Return the created event JSON.`}]
-        })
-      });
-      const data = await res.json();
-      const tb = (data.content||[]).find(b=>b.type==="text");
-      const hasError = tb?.text?.toLowerCase().includes("error") || tb?.text?.toLowerCase().includes("failed");
-      if (hasError) throw new Error(tb?.text||"Unknown error");
-      setSaveMsg({type:"ok", text:"Event created! Invites sent to participants."});
-      setTimeout(()=>{ setEventForm(null); setSaveMsg(null); fetchEvents(); }, 2000);
-    } catch(e) {
-      setSaveMsg({type:"err", text:"Could not create event. Try again."});
-    }
-    setSaving(false);
-  };
+  const prevWeek=()=>{ const d=new Date(weekStart); d.setDate(d.getDate()-7); setWeekStart(d); };
   const nextWeek=()=>{ const d=new Date(weekStart); d.setDate(d.getDate()+7); setWeekStart(d); };
   const goToday =()=>{ setWeekStart(getWeekStart(new Date())); const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); setMonthBase(d); };
 
@@ -542,8 +467,70 @@ function CalendarView({ contacts }) {
   };
   const fmtHour=h=>{ const ampm=h<12?"AM":"PM"; const hr=h===0?12:h>12?h-12:h; return `${hr} ${ampm}`; };
   const fmtTime=dt=>{ if(!dt) return ""; return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true}); };
-
   const weekLabel=`${weekStart.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${weekDays[6].toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;
+
+  const openNewEvent=(day,hour)=>{
+    const dateStr=day.toISOString().split("T")[0];
+    const endHour=Math.min(hour+1,23);
+    setEventForm({
+      title:"", date:dateStr,
+      startTime:`${String(hour).padStart(2,"0")}:00`,
+      endTime:`${String(endHour).padStart(2,"0")}:00`,
+      conferencing:"meet",
+      participants:[], participantInput:"",
+      description:"",
+    });
+    setSelectedEv(null);
+  };
+
+  const addParticipant=(form,setForm)=>{
+    if (!form?.participantInput?.trim()) return;
+    const email=form.participantInput.trim();
+    if (!form.participants.includes(email)) {
+      setForm(f=>({...f,participants:[...f.participants,email],participantInput:""}));
+    } else {
+      setForm(f=>({...f,participantInput:""}));
+    }
+  };
+
+  const saveNewEvent=async()=>{
+    if (!eventForm?.title?.trim()) return;
+    setSaving(true); setSaveMsg(null);
+    try {
+      const startISO=`${eventForm.date}T${eventForm.startTime}:00`;
+      const endISO=`${eventForm.date}T${eventForm.endTime}:00`;
+      const attendees=eventForm.participants.map(e=>({email:e}));
+      const conferenceData=eventForm.conferencing==="meet"
+        ? { createRequest:{ requestId:`bf-${Date.now()}`, conferenceSolutionKey:{type:"hangoutsMeet"} } }
+        : undefined;
+      const body={
+        summary:eventForm.title,
+        description:eventForm.description||"",
+        start:{ dateTime:startISO, timeZone:"America/New_York" },
+        end:{ dateTime:endISO, timeZone:"America/New_York" },
+        attendees,
+        ...(conferenceData?{conferenceData}:{}),
+        ...(eventForm.conferencing==="zoom"?{location:"Zoom — add your link after creating"}:{}),
+      };
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",max_tokens:1000,
+          system:"You are a calendar assistant. Create the Google Calendar event using the gcal_create_event tool exactly as requested. Return only the raw JSON result.",
+          mcp_servers:[{type:"url",url:"https://gcal.mcp.claude.com/mcp",name:"gcal"}],
+          messages:[{role:"user",content:`Create a Google Calendar event with these exact details: ${JSON.stringify(body)}. Use calendarId "primary" and conferenceDataVersion 1.`}]
+        })
+      });
+      const data=await res.json();
+      const tb=(data.content||[]).find(b=>b.type==="text");
+      if (tb?.text?.toLowerCase().includes("error")) throw new Error(tb.text);
+      setSaveMsg({type:"ok",text:"Event created! Invites sent to participants."});
+      setTimeout(()=>{ setEventForm(null); setSaveMsg(null); fetchEvents(); },2000);
+    } catch(e) {
+      setSaveMsg({type:"err",text:"Could not create event. Try again."});
+    }
+    setSaving(false);
+  };
 
   // Month mini
   const MonthMini=()=>{
@@ -597,116 +584,8 @@ function CalendarView({ contacts }) {
     );
   };
 
-  // ── NEW MEETING FORM ────────────────────────────────────────────────────────
-  const NewEventForm = () => {
-    if (!eventForm) return null;
-    const f = eventForm;
-    return(
-      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-        <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-            <h2 style={{margin:0,fontSize:18,fontWeight:700,color:D.text}}>New Meeting</h2>
-            <button onClick={()=>setEventForm(null)} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
-          </div>
-
-          {/* Title */}
-          <div style={{marginBottom:14}}>
-            <label style={S.lbl}>Meeting Title *</label>
-            <input value={f.title} onChange={e=>setEventForm(p=>({...p,title:e.target.value}))}
-              placeholder="e.g. Discovery Call with James" style={S.inp} autoFocus/>
-          </div>
-
-          {/* Date & Time */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
-            <div>
-              <label style={S.lbl}>Date</label>
-              <input type="date" value={f.date} onChange={e=>setEventForm(p=>({...p,date:e.target.value}))}
-                style={{...S.inp,colorScheme:"dark"}}/>
-            </div>
-            <div>
-              <label style={S.lbl}>Start</label>
-              <input type="time" value={f.startTime} onChange={e=>setEventForm(p=>({...p,startTime:e.target.value}))}
-                style={{...S.inp,colorScheme:"dark"}}/>
-            </div>
-            <div>
-              <label style={S.lbl}>End</label>
-              <input type="time" value={f.endTime} onChange={e=>setEventForm(p=>({...p,endTime:e.target.value}))}
-                style={{...S.inp,colorScheme:"dark"}}/>
-            </div>
-          </div>
-
-          {/* Conferencing */}
-          <div style={{marginBottom:14}}>
-            <label style={S.lbl}>Conferencing</label>
-            <div style={{display:"flex",gap:8}}>
-              {[["meet","🎥 Google Meet"],["zoom","🔵 Zoom"],["none","📵 No link"]].map(([val,label])=>(
-                <button key={val} onClick={()=>setEventForm(p=>({...p,conferencing:val}))}
-                  style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1.5px solid ${f.conferencing===val?D.accent:D.border}`,
-                    background:f.conferencing===val?"#0D1828":"transparent",
-                    color:f.conferencing===val?D.accent:D.textSub,
-                    cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:f.conferencing===val?600:400}}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {f.conferencing==="meet"&&<p style={{margin:"6px 0 0",fontSize:11,color:D.textMuted}}>A Google Meet link will be generated automatically.</p>}
-            {f.conferencing==="zoom"&&<p style={{margin:"6px 0 0",fontSize:11,color:"#F59E0B"}}>⚠️ Zoom requires the Zoom add-on in your Google Calendar. The location field will note Zoom — add your link manually after creating.</p>}
-          </div>
-
-          {/* Participants */}
-          <div style={{marginBottom:14}}>
-            <label style={S.lbl}>Participants</label>
-            <div style={{display:"flex",gap:8,marginBottom:8}}>
-              <input value={f.participantInput}
-                onChange={e=>setEventForm(p=>({...p,participantInput:e.target.value}))}
-                onKeyDown={e=>{ if(e.key==="Enter"||e.key===","){e.preventDefault();addParticipant();} }}
-                placeholder="email@example.com — press Enter to add"
-                style={{...S.inp,flex:1}}/>
-              <button onClick={addParticipant} style={{...S.btnSm,color:D.accent,borderColor:D.accent+"66",whiteSpace:"nowrap"}}>+ Add</button>
-            </div>
-            {f.participants.length>0&&(
-              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                {f.participants.map(email=>(
-                  <span key={email} style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,background:"#0D1828",border:`1px solid ${D.border}`,fontSize:12,color:D.textSub}}>
-                    {email}
-                    <button onClick={()=>setEventForm(p=>({...p,participants:p.participants.filter(e=>e!==email)}))}
-                      style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0,lineHeight:1,marginLeft:2}}>×</button>
-                  </span>
-                ))}
-              </div>
-            )}
-            {f.participants.length===0&&<p style={{fontSize:12,color:D.textMuted,margin:0}}>No participants yet — they'll receive a Google Calendar invite.</p>}
-          </div>
-
-          {/* Description */}
-          <div style={{marginBottom:20}}>
-            <label style={S.lbl}>Description (optional)</label>
-            <textarea value={f.description} onChange={e=>setEventForm(p=>({...p,description:e.target.value}))}
-              placeholder="Agenda, notes, or context…"
-              style={{...S.inp,height:60,resize:"none"}}/>
-          </div>
-
-          {/* Save message */}
-          {saveMsg&&(
-            <div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:13,fontWeight:500,
-              background:saveMsg.type==="ok"?"#0D2210":"#1A0808",
-              color:saveMsg.type==="ok"?"#86EFAC":"#FCA5A5",
-              border:`1px solid ${saveMsg.type==="ok"?"#166534":"#7F1D1D"}`}}>
-              {saveMsg.text}
-            </div>
-          )}
-
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={saveNewEvent} disabled={saving||!f.title.trim()}
-              style={{...S.btn1,opacity:saving||!f.title.trim()?0.6:1,flex:1}}>
-              {saving?"Creating…":"✅ Create & Send Invites"}
-            </button>
-            <button onClick={()=>setEventForm(null)} style={S.btn2}>Cancel</button>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // Event detail popup
+  const EventPopup=()=>{
     const [showLink,setShowLink]=useState(false);
     const [sq,setSq]=useState("");
     if (!selectedEv) return null;
@@ -759,6 +638,100 @@ function CalendarView({ contacts }) {
     );
   };
 
+  // New meeting form
+  const NewEventForm=()=>{
+    if (!eventForm) return null;
+    const f=eventForm;
+    return(
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <h2 style={{margin:0,fontSize:18,fontWeight:700,color:D.text}}>New Meeting</h2>
+            <button onClick={()=>{ setEventForm(null); setSaveMsg(null); }} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={S.lbl}>Meeting Title *</label>
+            <input value={f.title} onChange={e=>setEventForm(p=>({...p,title:e.target.value}))}
+              placeholder="e.g. Discovery Call with James" style={S.inp} autoFocus/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:14}}>
+            <div>
+              <label style={S.lbl}>Date</label>
+              <input type="date" value={f.date} onChange={e=>setEventForm(p=>({...p,date:e.target.value}))} style={{...S.inp,colorScheme:"dark"}}/>
+            </div>
+            <div>
+              <label style={S.lbl}>Start</label>
+              <input type="time" value={f.startTime} onChange={e=>setEventForm(p=>({...p,startTime:e.target.value}))} style={{...S.inp,colorScheme:"dark"}}/>
+            </div>
+            <div>
+              <label style={S.lbl}>End</label>
+              <input type="time" value={f.endTime} onChange={e=>setEventForm(p=>({...p,endTime:e.target.value}))} style={{...S.inp,colorScheme:"dark"}}/>
+            </div>
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={S.lbl}>Conferencing</label>
+            <div style={{display:"flex",gap:8}}>
+              {[["meet","🎥 Google Meet"],["zoom","🔵 Zoom"],["none","📵 No link"]].map(([val,label])=>(
+                <button key={val} onClick={()=>setEventForm(p=>({...p,conferencing:val}))}
+                  style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1.5px solid ${f.conferencing===val?D.accent:D.border}`,
+                    background:f.conferencing===val?"#0D1828":"transparent",
+                    color:f.conferencing===val?D.accent:D.textSub,
+                    cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:f.conferencing===val?600:400}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {f.conferencing==="meet"&&<p style={{margin:"6px 0 0",fontSize:11,color:D.textMuted}}>A Google Meet link will be generated automatically.</p>}
+            {f.conferencing==="zoom"&&<p style={{margin:"6px 0 0",fontSize:11,color:D.yellow}}>⚠️ Zoom requires the Zoom add-on in your Google Calendar. Add your link manually after creating.</p>}
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={S.lbl}>Participants</label>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <input value={f.participantInput}
+                onChange={e=>setEventForm(p=>({...p,participantInput:e.target.value}))}
+                onKeyDown={e=>{ if(e.key==="Enter"||e.key===","){ e.preventDefault(); addParticipant(eventForm,setEventForm); } }}
+                placeholder="email@example.com — press Enter to add"
+                style={{...S.inp,flex:1}}/>
+              <button onClick={()=>addParticipant(eventForm,setEventForm)} style={{...S.btnSm,color:D.accent,borderColor:D.accent+"66",whiteSpace:"nowrap"}}>+ Add</button>
+            </div>
+            {f.participants.length>0&&(
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {f.participants.map(email=>(
+                  <span key={email} style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,background:"#0D1828",border:`1px solid ${D.border}`,fontSize:12,color:D.textSub}}>
+                    {email}
+                    <button onClick={()=>setEventForm(p=>({...p,participants:p.participants.filter(e=>e!==email)}))}
+                      style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0,lineHeight:1,marginLeft:2}}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {f.participants.length===0&&<p style={{fontSize:12,color:D.textMuted,margin:0}}>No participants yet — they'll receive a Google Calendar invite.</p>}
+          </div>
+          <div style={{marginBottom:20}}>
+            <label style={S.lbl}>Description (optional)</label>
+            <textarea value={f.description} onChange={e=>setEventForm(p=>({...p,description:e.target.value}))}
+              placeholder="Agenda, notes, or context…" style={{...S.inp,height:60,resize:"none"}}/>
+          </div>
+          {saveMsg&&(
+            <div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:13,fontWeight:500,
+              background:saveMsg.type==="ok"?"#0D2210":"#1A0808",
+              color:saveMsg.type==="ok"?"#86EFAC":"#FCA5A5",
+              border:`1px solid ${saveMsg.type==="ok"?"#166534":"#7F1D1D"}`}}>
+              {saveMsg.text}
+            </div>
+          )}
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={saveNewEvent} disabled={saving||!f.title.trim()}
+              style={{...S.btn1,opacity:saving||!f.title.trim()?0.6:1,flex:1}}>
+              {saving?"Creating…":"✅ Create & Send Invites"}
+            </button>
+            <button onClick={()=>{ setEventForm(null); setSaveMsg(null); }} style={S.btn2}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return(
     <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 120px)",minHeight:600}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexShrink:0}}>
@@ -796,7 +769,8 @@ function CalendarView({ contacts }) {
                   {weekDays.map((d,di)=>{
                     const isTd=d.getTime()===todayDate.getTime();
                     return(
-                      <div key={di} onClick={()=>openNewEvent(d,h)}
+                      <div key={di}
+                        onClick={()=>openNewEvent(d,h)}
                         style={{height:56,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}}
                         onMouseEnter={e=>e.currentTarget.style.background=isTd?"#0D1E38":"#0D1220"}
                         onMouseLeave={e=>e.currentTarget.style.background=isTd?"#0D1828":"transparent"}>
@@ -804,7 +778,7 @@ function CalendarView({ contacts }) {
                           const {top,height,color}=evStyle(ev);
                           const linked=calLinks[ev.id]?contacts.find(c=>c.id===calLinks[ev.id]):null;
                           return(
-                            <div key={ev.id} onClick={()=>setSelectedEv(ev===selectedEv?null:ev)}
+                            <div key={ev.id} onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
                               style={{position:"absolute",left:2,right:2,top:top-(h*56),height,background:color+"33",border:`1.5px solid ${color}`,borderRadius:5,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"2px 5px"}}>
                               <div style={{fontSize:10,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
                               {height>30&&<div style={{fontSize:9,color:color+"cc"}}>{fmtTime(ev.start?.dateTime)}</div>}
@@ -883,14 +857,11 @@ function ColdView({ contacts, setSelected, setView }) {
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 function Dashboard({ contacts, followups, setSelected, setView }) {
   const active = contacts.filter(c=>!c.cold);
-  const cold   = contacts.filter(c=>c.cold);
-
   const withCadence = active.map(c=>({c,u:getUrgency(c),next:getNextCadence(c),type:"cadence"})).filter(x=>x.next);
   const manualItems = followups.filter(f=>!f.done&&f.date).map(f=>{
     const contact=contacts.find(c=>c.id===f.contactId); if(!contact) return null;
     return{c:contact,fu:f,u:getDateUrgency(f.date),type:"manual"};
   }).filter(Boolean);
-
   const allItems=[...withCadence,...manualItems].sort((a,b)=>(a.u?a.u.diff:999)-(b.u?b.u.diff:999));
   const overdue =allItems.filter(x=>x.u&&x.u.level==="overdue");
   const today   =allItems.filter(x=>x.u&&x.u.level==="today");
@@ -1075,15 +1046,15 @@ class ErrorBoundary extends React.Component {
   render(){
     if(this.state.error) return(
       <div style={{padding:30,color:"#F87171"}}>
-        <p style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong loading this contact.</p>
-        <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8}}>{this.state.error?.message}{"\n"}{this.state.error?.stack}</pre>
+        <p style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong.</p>
+        <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8}}>{this.state.error?.message}</pre>
         <button onClick={()=>this.props.onBack()} style={{marginTop:14,background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>← Go Back</button>
       </div>
     );
     return this.props.children;
   }
 }
-function SafeDetailView(props){ return <ErrorBoundary onBack={()=>props.setView("contacts")}><DetailView {...props}/></ErrorBoundary>; }
+function SafeDetailView(props){ return <ErrorBoundary onBack={()=>props.setView("contactlist")}><DetailView {...props}/></ErrorBoundary>; }
 
 class RootErrorBoundary extends React.Component {
   constructor(props){ super(props); this.state={error:null}; }
@@ -1128,10 +1099,9 @@ function App() {
 
   const activeContacts = contacts.filter(c=>!c.cold);
   const coldContacts   = contacts.filter(c=>c.cold);
-
-  const urgentCount = activeContacts.filter(c=>{ const u=getUrgency(c); return u&&(u.level==="overdue"||u.level==="today"); }).length
+  const urgentCount    = activeContacts.filter(c=>{ const u=getUrgency(c); return u&&(u.level==="overdue"||u.level==="today"); }).length
     + followups.filter(f=>{ if(f.done||!f.date) return false; const u=getDateUrgency(f.date); return u.level==="overdue"||u.level==="today"; }).length;
-  const coldDueCount = coldContacts.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)<=0).length;
+  const coldDueCount   = coldContacts.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)<=0).length;
 
   useEffect(()=>{
     const localC=localStorage.getItem(STORAGE_KEY);
@@ -1163,6 +1133,7 @@ function App() {
   },[contacts,followups,loadingInit]);
 
   const showToast=(msg,type="ok")=>{ setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
   const exportBackup=()=>{
     const blob=new Blob([JSON.stringify({contacts,followups,exportedAt:new Date().toISOString()},null,2)],{type:"application/json"});
     const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`bridgeflow-${todayStr()}.json`; a.click();
@@ -1190,7 +1161,7 @@ function App() {
     setEditMode(false); setView(editMode?"detail":"contacts");
   };
 
-  const deleteContact=(id)=>{ setContacts(c=>c.filter(x=>x.id!==id)); setFollowups(f=>f.filter(x=>x.contactId!==id)); setView("contacts"); };
+  const deleteContact=(id)=>{ setContacts(c=>c.filter(x=>x.id!==id)); setFollowups(f=>f.filter(x=>x.contactId!==id)); setView("contactlist"); };
   const addLog=(contactId)=>{
     if(!newLog.trim()) return;
     const entry={id:Date.now().toString(),text:newLog,date:new Date().toISOString()};
@@ -1239,12 +1210,7 @@ function App() {
       <div style={{background:D.surface,borderBottom:`1px solid ${D.border}`,padding:"0 20px",display:"flex",alignItems:"center",height:52,gap:12}}>
         <span style={{fontSize:18,fontWeight:700,color:D.text,letterSpacing:"-0.3px"}}>BridgeFlow</span>
         <div style={{display:"flex",gap:2,background:D.card,borderRadius:8,padding:3,marginLeft:8}}>
-          {[
-            ["contacts","👥 Contacts",0],
-            ["dashboard","📅 Follow-ups",urgentCount],
-            ["cold","❄️ Cold",coldDueCount],
-            ["calendar","📅 Calendar",0],
-          ].map(([t,label,badge])=>(
+          {[["contacts","👥 Contacts",0],["dashboard","📅 Follow-ups",urgentCount],["cold","❄️ Cold",coldDueCount],["calendar","📅 Calendar",0]].map(([t,label,badge])=>(
             <button key={t} onClick={()=>switchTab(t)}
               style={{padding:"4px 12px",borderRadius:6,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t?600:400,background:tab===t?D.accent:"transparent",color:tab===t?"#fff":D.textSub,border:"none",display:"flex",alignItems:"center",gap:5}}>
               {label}
@@ -1260,6 +1226,7 @@ function App() {
       {/* MAIN */}
       <div style={{maxWidth:view==="calendar"?"100%":740,margin:"0 auto",padding:"30px 20px"}}>
 
+        {/* PIPELINE HOME */}
         {view==="contacts"&&(
           <div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
@@ -1270,17 +1237,16 @@ function App() {
               <button onClick={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} style={S.btn1}>+ Add Contact</button>
             </div>
             <PipelineBar
-              stageCounts={stageCounts} filterStage={filterStage} setFilterStage={setFilterStage}
+              stageCounts={stageCounts} filterStage={filterStage}
               totalContacts={activeContacts.length} urgentCount={urgentCount}
               coldCount={coldContacts.length} coldDueCount={coldDueCount}
               onTabClick={(t)=>{ if(t==="contacts"){setFilterStage("All");setSearch("");setView("contactlist");}else switchTab(t); }}
               onStageClick={(st)=>{ setFilterStage(st); setSearch(""); setView("contactlist"); }}
             />
             <div style={{display:"flex",gap:10,marginBottom:18}}>
-              <input placeholder="Search contacts…" value={search} onChange={e=>{setSearch(e.target.value);if(e.target.value) setView("contactlist");}}
+              <input placeholder="Search contacts…" value={search} onChange={e=>{ setSearch(e.target.value); if(e.target.value) setView("contactlist"); }}
                 style={{flex:1,padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text}}/>
             </div>
-            {/* Hint text when no stage selected */}
             <div style={{textAlign:"center",padding:"50px 20px",color:D.textMuted}}>
               <div style={{fontSize:40,marginBottom:12}}>👆</div>
               <p style={{fontSize:15,color:D.textSub,fontWeight:500}}>Select a stage or search to view contacts</p>
@@ -1289,13 +1255,14 @@ function App() {
           </div>
         )}
 
+        {/* CONTACT LIST */}
         {view==="contactlist"&&(
           <div>
             <button onClick={()=>{setView("contacts");setFilterStage("All");setSearch("");}} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back to Pipeline</button>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
               <div>
                 <h2 style={{margin:0,fontSize:22,fontWeight:700,color:D.text}}>
-                  {filterStage==="All" ? "All Contacts" : `${STAGE_META[filterStage]?.icon} ${filterStage}`}
+                  {filterStage==="All"?"All Contacts":`${STAGE_META[filterStage]?.icon} ${filterStage}`}
                 </h2>
                 <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{filtered.length} contact{filtered.length!==1?"s":""}</p>
               </div>
@@ -1335,11 +1302,11 @@ function App() {
           </div>
         )}
 
-        {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView}/>}
-        {view==="cold"     &&<ColdView  contacts={contacts} setSelected={setSelected} setView={setView}/>}
-        {view==="calendar" &&<CalendarView contacts={contacts}/>}
-        {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive}/>}
-        {view==="add"      &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView}/>}
+        {view==="dashboard" &&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView}/>}
+        {view==="cold"      &&<ColdView  contacts={contacts} setSelected={setSelected} setView={setView}/>}
+        {view==="calendar"  &&<CalendarView contacts={contacts}/>}
+        {view==="detail"    &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive}/>}
+        {view==="add"       &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView}/>}
       </div>
 
       {showSettings&&<SettingsModal syncState={syncState} syncMsg={syncMsg} exportBackup={exportBackup} importBackup={importBackup} onClose={()=>setShowSettings(false)}/>}
