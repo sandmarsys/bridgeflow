@@ -233,7 +233,14 @@ function PipelineBar({stageCounts,filterStage,setFilterStage,totalContacts,urgen
   );
 }
 
-// ── ADD/EDIT VIEW ─────────────────────────────────────────────────────────────
+function BackHome({ switchTab }) {
+  return(
+    <button onClick={()=>switchTab("home")}
+      style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>
+      ← Home
+    </button>
+  );
+}
 function AddEditView({form,setForm,editMode,saveContact,setView}){
   return(
     <div>
@@ -388,7 +395,7 @@ function calColor(str){let h=0;for(let i=0;i<str.length;i++)h=str.charCodeAt(i)+
 
 const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:""});
 
-function CalendarView({contacts}){
+function CalendarView({contacts,switchTab}){
   const todayDate=new Date();todayDate.setHours(0,0,0,0);
 
   const getWeekStart=d=>{
@@ -672,9 +679,12 @@ function CalendarView({contacts}){
   return(
     <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 120px)",minHeight:600}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <h1 style={{margin:0,fontSize:22,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>📅 {weekLabel}</h1>
-          {loading&&<span style={{fontSize:12,color:D.textMuted,animation:"pulse 1s infinite"}}>Syncing…</span>}
+        <div style={{display:"flex",alignItems:"center",gap:16}}>
+          <BackHome switchTab={switchTab}/>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <h1 style={{margin:0,fontSize:22,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>📅 {weekLabel}</h1>
+            {loading&&<span style={{fontSize:12,color:D.textMuted,animation:"pulse 1s infinite"}}>Syncing…</span>}
+          </div>
         </div>
         <div style={{display:"flex",gap:6}}>
           <button onClick={()=>openNew(todayStr(),"09:00")} style={{...S.btn1,fontSize:12,padding:"6px 14px"}}>+ New Event</button>
@@ -745,7 +755,7 @@ function CalendarView({contacts}){
 }
 
 // ── HOME VIEW ─────────────────────────────────────────────────────────────────
-function HomeView({ contacts, followups, switchTab, setFilterStage }) {
+function HomeView({ contacts, followups, switchTab, setFilterStage, onAddContact }) {
   const activeContacts = contacts.filter(c=>!c.cold);
   const coldContacts   = contacts.filter(c=>c.cold);
   const [upcomingEvs,  setUpcomingEvs]  = useState([]);
@@ -782,11 +792,14 @@ function HomeView({ contacts, followups, switchTab, setFilterStage }) {
   return(
     <div>
       {/* Greeting */}
-      <div style={{marginBottom:24}}>
-        <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>👋 Welcome back</h1>
-        <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>
-          {urgentCount>0?`You have ${urgentCount} urgent follow-up${urgentCount>1?"s":""} today`:"You're all caught up today 🎉"}
-        </p>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24}}>
+        <div>
+          <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>👋 Welcome back</h1>
+          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>
+            {urgentCount>0?`You have ${urgentCount} urgent follow-up${urgentCount>1?"s":""} today`:"You're all caught up today 🎉"}
+          </p>
+        </div>
+        <button onClick={()=>onAddContact()} style={S.btn1}>+ Add Contact</button>
       </div>
 
       {/* Stat boxes */}
@@ -867,7 +880,7 @@ function HomeView({ contacts, followups, switchTab, setFilterStage }) {
 }
 
 // ── COLD VIEW ─────────────────────────────────────────────────────────────────
-function ColdView({contacts,setSelected,setView}){
+function ColdView({contacts,setSelected,setView,switchTab}){
   const cold=contacts.filter(c=>c.cold);
   const due=cold.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)<=0).sort((a,b)=>daysBetween(a.coldFollowUpDate)-daysBetween(b.coldFollowUpDate));
   const upcoming=cold.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)>0).sort((a,b)=>daysBetween(a.coldFollowUpDate)-daysBetween(b.coldFollowUpDate));
@@ -895,6 +908,7 @@ function ColdView({contacts,setSelected,setView}){
   };
   return(
     <div>
+      <BackHome switchTab={switchTab}/>
       <div style={{marginBottom:24}}>
         <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.coldText,letterSpacing:"-0.5px"}}>❄️ Cold Check-ins</h1>
         <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{due.length} due now · {upcoming.length} upcoming · {cold.length} total</p>
@@ -916,7 +930,7 @@ function ColdView({contacts,setSelected,setView}){
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
-function Dashboard({contacts,followups,setSelected,setView}){
+function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTab}){
   const active=contacts.filter(c=>!c.cold);
   const withCadence=active.map(c=>({c,u:getUrgency(c),next:getNextCadence(c),type:"cadence"})).filter(x=>x.next);
   const manualItems=followups.filter(f=>!f.done&&f.date).map(f=>{
@@ -961,9 +975,13 @@ function Dashboard({contacts,followups,setSelected,setView}){
   };
   return(
     <div>
-      <div style={{marginBottom:24}}>
-        <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Follow-up Dashboard</h1>
-        <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{overdue.length+today.length} urgent · {soon.length} this week · {upcoming.length} upcoming</p>
+      <BackHome switchTab={switchTab}/>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24}}>
+        <div>
+          <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Follow-up Dashboard</h1>
+          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{overdue.length+today.length} urgent · {soon.length} this week · {upcoming.length} upcoming</p>
+        </div>
+        <button onClick={onAddContact} style={S.btn1}>+ Add Contact</button>
       </div>
       {!allItems.length?(
         <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
@@ -983,14 +1001,17 @@ function Dashboard({contacts,followups,setSelected,setView}){
 }
 
 // ── DETAIL VIEW ───────────────────────────────────────────────────────────────
-function DetailView({selected,contacts,followups,setFollowups,setContacts,setView,setForm,setEditMode,deleteContact,addLog,newLog,setNewLog,addFollowup,newFU,setNewFU,showFU,setShowFU,logRef,onCompleteCadence,onMoveToCold,onRevive}){
+function DetailView({selected,contacts,followups,setFollowups,setContacts,setView,setForm,setEditMode,deleteContact,addLog,newLog,setNewLog,addFollowup,newFU,setNewFU,showFU,setShowFU,logRef,onCompleteCadence,onMoveToCold,onRevive,switchTab}){
   if(!selected)return null;
   const contact=contacts.find(c=>c.id===selected.id)||selected;
   const cFU=followups.filter(f=>f.contactId===contact.id).sort((a,b)=>a.date.localeCompare(b.date));
   const stageIdx=STAGES.indexOf(contact.stage);
   return(
     <div>
-      <button onClick={()=>setView("contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back</button>
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:4}}>
+        <BackHome switchTab={switchTab}/>
+        <button onClick={()=>setView("contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>← Contacts</button>
+      </div>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:22}}>
         <div style={{display:"flex",gap:14,alignItems:"center"}}>
           <div style={{width:54,height:54,borderRadius:"50%",background:stringToColor(contact.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff",flexShrink:0,opacity:contact.cold?0.6:1}}>{contact.name.charAt(0).toUpperCase()}</div>
@@ -1277,9 +1298,10 @@ function App(){
       </div>
 
       <div style={{maxWidth:view==="calendar"?"100%":740,margin:"0 auto",padding:"30px 20px"}}>
-        {view==="home"     &&<HomeView contacts={contacts} followups={followups} switchTab={switchTab} setFilterStage={setFilterStage}/>}
+        {view==="home"     &&<HomeView contacts={contacts} followups={followups} switchTab={switchTab} setFilterStage={setFilterStage} onAddContact={()=>{setForm(emptyContact);setEditMode(false);setView("add");}}/>}
         {view==="contacts"&&(
           <div>
+            <BackHome switchTab={switchTab}/>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
               <div>
                 <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Contacts</h1>
@@ -1325,11 +1347,11 @@ function App(){
             )}
           </div>
         )}
-        {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView}/>}
-        {view==="cold"     &&<ColdView  contacts={contacts} setSelected={setSelected} setView={setView}/>}
-        {view==="calendar" &&<CalendarView contacts={contacts}/>}
-        {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive}/>}
-        {view==="add"      &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView}/>}
+        {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView} onAddContact={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} switchTab={switchTab}/>}
+        {view==="cold"     &&<ColdView  contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
+        {view==="calendar" &&<CalendarView contacts={contacts} switchTab={switchTab}/>}
+        {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive} switchTab={switchTab}/>}
+        {view==="add"      &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView} switchTab={switchTab}/>}
       </div>
 
       {showSettings&&<SettingsModal syncState={syncState} syncMsg={syncMsg} exportBackup={exportBackup} importBackup={importBackup} onClose={()=>setShowSettings(false)}/>}
