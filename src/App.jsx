@@ -395,7 +395,7 @@ function calColor(str){let h=0;for(let i=0;i<str.length;i++)h=str.charCodeAt(i)+
 
 const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:""});
 
-function CalendarView({contacts,switchTab}){
+function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
   const todayDate=new Date();todayDate.setHours(0,0,0,0);
 
   const getWeekStart=d=>{
@@ -407,7 +407,6 @@ function CalendarView({contacts,switchTab}){
   const [monthBase,  setMonthBase]  = useState(()=>{const d=new Date();d.setDate(1);d.setHours(0,0,0,0);return d;});
   const [events,     setEvents]     = useState([]);
   const [loading,    setLoading]    = useState(false);
-  const [calLinks,   setCalLinks]   = useState(()=>{try{return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}");}catch{return{};}});
   const [selectedEv, setSelectedEv] = useState(null);
   const [showNew,    setShowNew]    = useState(false);
   const [newEv,      setNewEv]      = useState(emptyNewEv());
@@ -417,7 +416,6 @@ function CalendarView({contacts,switchTab}){
   const [showLink,   setShowLink]   = useState(false);
   const gridRef=useRef(null);
 
-  useEffect(()=>{localStorage.setItem(CAL_LINKS_KEY,JSON.stringify(calLinks));},[calLinks]);
   useEffect(()=>{if(gridRef.current)gridRef.current.scrollTop=8*56;},[]);
 
   const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d;});
@@ -1000,8 +998,84 @@ function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTa
   );
 }
 
+// ── MEETING HISTORY ───────────────────────────────────────────────────────────
+function MeetingHistory({ contactId, calLinks }) {
+  const [meetings, setMeetings] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+
+  useEffect(()=>{
+    const load=async()=>{
+      setLoading(true);
+      try{
+        // Fetch last 90 days + next 30 days
+        const start=new Date(); start.setDate(start.getDate()-90);
+        const end=new Date();   end.setDate(end.getDate()+30);
+        const fmt=d=>d.toISOString().split(".")[0];
+        const res=await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(start))+"&timeMax="+encodeURIComponent(fmt(end)));
+        const json=await res.json();
+        if(json.ok&&Array.isArray(json.events)){
+          // Filter to only events linked to this contact
+          const linked=json.events.filter(ev=>calLinks[ev.id]===contactId);
+          // Sort newest first
+          linked.sort((a,b)=>new Date(b.start?.dateTime||b.start?.date)-new Date(a.start?.dateTime||a.start?.date));
+          setMeetings(linked);
+        }
+      }catch{ setMeetings([]); }
+      setLoading(false);
+    };
+    load();
+  },[contactId,calLinks]);
+
+  const fmtMeetingTime=ev=>{
+    const s=ev.start?.dateTime||ev.start?.date;
+    if(!s) return"";
+    return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
+  };
+
+  const getMeetingDuration=ev=>{
+    const s=new Date(ev.start?.dateTime||ev.start?.date);
+    const e=new Date(ev.end?.dateTime||ev.end?.date);
+    const mins=Math.round((e-s)/60000);
+    if(mins<60) return`${mins}m`;
+    const h=Math.floor(mins/60); const m=mins%60;
+    return m>0?`${h}h ${m}m`:`${h}h`;
+  };
+
+  const isPast=ev=>new Date(ev.start?.dateTime||ev.start?.date)<new Date();
+
+  if(loading) return<p style={{fontSize:13,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading meetings…</p>;
+  if(!meetings.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>No linked meetings yet. Link events from the Calendar tab.</p>;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {meetings.map(ev=>{
+        const past=isPast(ev);
+        const color=past?D.textMuted:D.accent;
+        return(
+          <div key={ev.id} style={{display:"flex",gap:12,padding:"10px 14px",borderRadius:10,background:D.surface,border:`1px solid ${past?D.border:D.accent+"44"}`}}>
+            <div style={{width:3,borderRadius:2,background:past?D.border:D.accent,flexShrink:0,alignSelf:"stretch"}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
+                <span style={{fontSize:13,fontWeight:600,color:past?D.textSub:D.text}}>{ev.summary||"(No title)"}</span>
+                <span style={{fontSize:10,fontWeight:600,color:past?"#3A5A3A":"#1A3A5A",background:past?"#0D1A0D":"#0D1A2E",padding:"1px 7px",borderRadius:20,border:`1px solid ${past?"#1A3A1A":"#1A3A5A"}`}}>
+                  {past?"Past":"Upcoming"}
+                </span>
+              </div>
+              <div style={{fontSize:12,color:D.textMuted}}>
+                📅 {fmtMeetingTime(ev)}
+                <span style={{marginLeft:10}}>⏱ {getMeetingDuration(ev)}</span>
+                {ev.location&&<span style={{marginLeft:10}}>📍 {ev.location}</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── DETAIL VIEW ───────────────────────────────────────────────────────────────
-function DetailView({selected,contacts,followups,setFollowups,setContacts,setView,setForm,setEditMode,deleteContact,addLog,newLog,setNewLog,addFollowup,newFU,setNewFU,showFU,setShowFU,logRef,onCompleteCadence,onMoveToCold,onRevive,switchTab}){
+function DetailView({selected,contacts,followups,setFollowups,setContacts,setView,setForm,setEditMode,deleteContact,addLog,newLog,setNewLog,addFollowup,newFU,setNewFU,showFU,setShowFU,logRef,onCompleteCadence,onMoveToCold,onRevive,switchTab,calLinks}){
   if(!selected)return null;
   const contact=contacts.find(c=>c.id===selected.id)||selected;
   const cFU=followups.filter(f=>f.contactId===contact.id).sort((a,b)=>a.date.localeCompare(b.date));
@@ -1157,6 +1231,7 @@ class RootErrorBoundary extends React.Component{
 function App(){
   const[contacts,    setContacts]    = useState([]);
   const[followups,   setFollowups]   = useState([]);
+  const[calLinks,    setCalLinks]    = useState(()=>{try{return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}");}catch{return{};}});
   const[view,        setView]        = useState("home");
   const[tab,         setTab]         = useState("home");
   const[selected,    setSelected]    = useState(null);
@@ -1195,6 +1270,7 @@ function App(){
 
   useEffect(()=>{localStorage.setItem(STORAGE_KEY,JSON.stringify(contacts));},[contacts]);
   useEffect(()=>{localStorage.setItem(FOLLOWUP_KEY,JSON.stringify(followups));},[followups]);
+  useEffect(()=>{localStorage.setItem(CAL_LINKS_KEY,JSON.stringify(calLinks));},[calLinks]);
 
   const scheduleSync=useCallback((c,f)=>{
     clearTimeout(syncTimer.current);setSyncState("syncing");
@@ -1349,8 +1425,8 @@ function App(){
         )}
         {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView} onAddContact={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} switchTab={switchTab}/>}
         {view==="cold"     &&<ColdView  contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
-        {view==="calendar" &&<CalendarView contacts={contacts} switchTab={switchTab}/>}
-        {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive} switchTab={switchTab}/>}
+        {view==="calendar" &&<CalendarView contacts={contacts} switchTab={switchTab} calLinks={calLinks} setCalLinks={setCalLinks}/>}
+        {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive} switchTab={switchTab} calLinks={calLinks}/>}
         {view==="add"      &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView} switchTab={switchTab}/>}
       </div>
 
