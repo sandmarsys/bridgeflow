@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 const STORAGE_KEY   = "bf-contacts-v3";
 const FOLLOWUP_KEY  = "bf-followups-v3";
 const CAL_LINKS_KEY = "bf-cal-links-v1";
-
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyukMZkIN9kJLNX3Gg2L-xYZpudEFHEgvvCQK_RNQnn9yBdRZr1CCIyKfdOvncA00YjRg/exec";
 
 const STAGES = ["Connection","Conversation","Commitment","Client","Continuation"];
@@ -14,7 +13,6 @@ const STAGE_META = {
   Client:       { bg:"#1A1200", text:"#FDE68A", dot:"#F59E0B", icon:"💰", desc:"Enrolled & active" },
   Continuation: { bg:"#1A0A1A", text:"#F0ABFC", dot:"#D946EF", icon:"♾️", desc:"Referrals & renewals" },
 };
-
 const CADENCE_DAYS   = [2,5,10,20];
 const CADENCE_LABELS = ["Follow-up 1","Follow-up 2","Follow-up 3","Follow-up 4"];
 const COLD_MONTHS    = 3;
@@ -26,7 +24,6 @@ const D = {
   accent:"#3B82F6", green:"#22C55E", red:"#EF4444", yellow:"#F59E0B",
   coldBorder:"#2A3A50", coldText:"#7A9BB5",
 };
-
 const S = {
   btn1:  {background:D.accent,color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,fontFamily:"inherit",cursor:"pointer",fontWeight:500},
   btn2:  {background:"transparent",color:D.textSub,border:`1.5px solid ${D.border}`,borderRadius:8,padding:"8px 18px",fontSize:14,fontFamily:"inherit",cursor:"pointer"},
@@ -38,72 +35,76 @@ const S = {
 };
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
-function todayStr()  { return new Date().toISOString().split("T")[0]; }
+function todayStr() { return new Date().toISOString().split("T")[0]; }
 function addDays(dateStr, days) {
   try {
-    const clean = (dateStr||todayStr()).split("T")[0];
-    const d = new Date(clean+"T00:00:00");
-    if (isNaN(d)) return todayStr();
+    const clean=(dateStr||todayStr()).split("T")[0];
+    const d=new Date(clean+"T00:00:00"); if(isNaN(d)) return todayStr();
     d.setDate(d.getDate()+days); return d.toISOString().split("T")[0];
   } catch { return todayStr(); }
 }
 function addMonths(dateStr, months) {
-  const d = new Date(dateStr+"T00:00:00"); d.setMonth(d.getMonth()+months); return d.toISOString().split("T")[0];
+  const d=new Date(dateStr+"T00:00:00"); d.setMonth(d.getMonth()+months); return d.toISOString().split("T")[0];
 }
 function daysBetween(dateStr) {
-  const today = new Date(new Date().toDateString());
-  const due   = new Date(dateStr+"T00:00:00");
-  return Math.round((due-today)/(1000*60*60*24));
+  return Math.round((new Date(dateStr+"T00:00:00")-new Date(new Date().toDateString()))/(1000*60*60*24));
 }
 function formatDate(d) {
-  if (!d) return "";
+  if(!d) return"";
   return new Date(d+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
 }
-function isOverdue(d){ return d ? new Date(d+"T00:00:00")<new Date(new Date().toDateString()) : false; }
-function isToday(d)  { return d ? d===todayStr() : false; }
+function isOverdue(d){ return d?new Date(d+"T00:00:00")<new Date(new Date().toDateString()):false; }
+function isToday(d)  { return d?d===todayStr():false; }
 function stringToColor(str){
   const c=["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#6366F1","#EF4444"];
   let h=0; for(let i=0;i<str.length;i++) h=str.charCodeAt(i)+((h<<5)-h);
   return c[Math.abs(h)%c.length];
 }
 function getCadenceDates(stageEnteredAt) {
-  if (!stageEnteredAt) return [];
-  return CADENCE_DAYS.map((d,i)=>({ label:CADENCE_LABELS[i], date:addDays(stageEnteredAt,d), day:d }));
+  if(!stageEnteredAt) return[];
+  return CADENCE_DAYS.map((d,i)=>({label:CADENCE_LABELS[i],date:addDays(stageEnteredAt,d),day:d}));
 }
 function getNextCadence(contact) {
-  if (!contact.stageEnteredAt||contact.cold) return null;
+  if(!contact.stageEnteredAt||contact.cold) return null;
   const cadence=getCadenceDates(contact.stageEnteredAt);
   const completed=contact.cadenceCompleted||[];
   return cadence.find(c=>!completed.includes(c.date))||null;
 }
 function getUrgency(contact) {
-  if (contact.cold) {
-    if (!contact.coldFollowUpDate) return null;
+  if(contact.cold) {
+    if(!contact.coldFollowUpDate) return null;
     const diff=daysBetween(contact.coldFollowUpDate);
-    if (diff<0)  return{level:"overdue",color:D.coldText,label:`${Math.abs(diff)}d overdue`,diff};
-    if (diff===0) return{level:"today", color:"#7AB8D4",label:"Due today",diff};
-    return        {level:"upcoming",   color:D.coldText,label:`in ${diff}d`,diff};
+    if(diff<0)  return{level:"overdue",color:D.coldText,label:`${Math.abs(diff)}d overdue`,diff};
+    if(diff===0) return{level:"today", color:"#7AB8D4",label:"Due today",diff};
+    return       {level:"upcoming",  color:D.coldText,label:`in ${diff}d`,diff};
   }
   const next=getNextCadence(contact); if(!next) return null;
   const diff=daysBetween(next.date);
-  if (diff<0)  return{level:"overdue",color:D.red,   label:`${Math.abs(diff)}d overdue`,diff};
-  if (diff===0) return{level:"today", color:"#F97316",label:"Due today",diff};
-  if (diff<=2)  return{level:"soon",  color:D.yellow, label:`Due in ${diff}d`,diff};
-  return        {level:"upcoming",   color:D.textSub, label:`Due in ${diff}d`,diff};
+  if(diff<0)  return{level:"overdue",color:D.red,   label:`${Math.abs(diff)}d overdue`,diff};
+  if(diff===0) return{level:"today", color:"#F97316",label:"Due today",diff};
+  if(diff<=2)  return{level:"soon",  color:D.yellow, label:`Due in ${diff}d`,diff};
+  return       {level:"upcoming",   color:D.textSub, label:`Due in ${diff}d`,diff};
 }
 function getDateUrgency(dateStr) {
   const diff=daysBetween(dateStr);
-  if (diff<0)  return{level:"overdue",color:D.red,   label:`${Math.abs(diff)}d overdue`,diff};
-  if (diff===0) return{level:"today", color:"#F97316",label:"Due today",diff};
-  if (diff<=2)  return{level:"soon",  color:D.yellow, label:`Due in ${diff}d`,diff};
-  return        {level:"upcoming",   color:D.textSub, label:`Due in ${diff}d`,diff};
+  if(diff<0)  return{level:"overdue",color:D.red,   label:`${Math.abs(diff)}d overdue`,diff};
+  if(diff===0) return{level:"today", color:"#F97316",label:"Due today",diff};
+  if(diff<=2)  return{level:"soon",  color:D.yellow, label:`Due in ${diff}d`,diff};
+  return       {level:"upcoming",   color:D.textSub, label:`Due in ${diff}d`,diff};
+}
+
+// Key for matching calendar events by title+date (avoids ID format issues)
+function makeEvKey(ev) {
+  const dt=ev.start?.dateTime||ev.start?.date||"";
+  return`${(ev.summary||"").trim().toLowerCase()}::${dt.split("T")[0]}`;
 }
 
 const emptyContact={name:"",company:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:""};
+const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:""});
 
 function normalizeContact(c) {
   const str=v=>(v===null||v===undefined)?"":String(v);
-  const safe=v=>{ try{const d=new Date(v);return isNaN(d)?todayStr():v;}catch{return todayStr();}};
+  const safe=v=>{try{const d=new Date(v);return isNaN(d)?todayStr():v;}catch{return todayStr();}};
   const safeEnteredAt=str(c.stageEnteredAt)||(c.createdAt?str(c.createdAt).split("T")[0]:todayStr());
   return{
     ...c,
@@ -155,6 +156,14 @@ async function pullFromScript(){
 }
 
 // ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
+function BackHome({switchTab}){
+  return(
+    <button onClick={()=>switchTab("home")}
+      style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>
+      ← Home
+    </button>
+  );
+}
 function StageBadge({stage,showDesc}){
   const m=STAGE_META[stage]||STAGE_META.Connection;
   return(
@@ -190,61 +199,12 @@ function InfoRow({label,value,link}){
   );
 }
 
-// ── PIPELINE BAR ──────────────────────────────────────────────────────────────
-function PipelineBar({stageCounts,filterStage,setFilterStage,totalContacts,urgentCount,coldCount,coldDueCount,onTabClick}){
-  return(
-    <div style={{...S.card}}>
-      <p style={{margin:"0 0 12px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Pipeline Overview</p>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
-        <button onClick={()=>onTabClick("contacts")} style={{background:"#0D1828",border:`1.5px solid #2E4060`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
-          <div style={{fontSize:18,marginBottom:4}}>👥</div>
-          <div style={{fontSize:10,fontWeight:600,color:D.textSub}}>Contacts</div>
-          <div style={{fontSize:22,fontWeight:700,color:D.text,lineHeight:1.3,marginTop:2}}>{totalContacts}</div>
-        </button>
-        <button onClick={()=>onTabClick("dashboard")} style={{background:urgentCount>0?"#1A0D00":"#0D1828",border:`1.5px solid ${urgentCount>0?D.red+"66":"#2E4060"}`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
-          <div style={{fontSize:18,marginBottom:4}}>📅</div>
-          <div style={{fontSize:10,fontWeight:600,color:urgentCount>0?D.red:D.textSub}}>Follow-ups</div>
-          <div style={{fontSize:22,fontWeight:700,color:urgentCount>0?D.red:D.text,lineHeight:1.3,marginTop:2}}>{urgentCount}</div>
-          {urgentCount>0&&<div style={{fontSize:9,color:D.red,marginTop:1}}>urgent</div>}
-        </button>
-        <button onClick={()=>onTabClick("cold")} style={{background:coldDueCount>0?"#0A1018":"#0D1828",border:`1.5px solid ${coldDueCount>0?"#2A5A78":"#2E4060"}`,borderRadius:8,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
-          <div style={{fontSize:18,marginBottom:4}}>❄️</div>
-          <div style={{fontSize:10,fontWeight:600,color:coldDueCount>0?"#7AB8D4":D.textSub}}>Cold</div>
-          <div style={{fontSize:22,fontWeight:700,color:coldDueCount>0?"#7AB8D4":D.text,lineHeight:1.3,marginTop:2}}>{coldCount}</div>
-          {coldDueCount>0&&<div style={{fontSize:9,color:"#7AB8D4",marginTop:1}}>{coldDueCount} due</div>}
-        </button>
-      </div>
-      <div style={{height:1,background:D.border,marginBottom:12}}/>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
-        {STAGES.map((st,i)=>{
-          const m=STAGE_META[st];const active=filterStage===st;
-          return(
-            <button key={st} onClick={()=>setFilterStage(active?"All":st)}
-              style={{position:"relative",background:active?m.bg:"transparent",border:`1.5px solid ${active?m.dot:D.border}`,borderRadius:8,padding:"10px 6px",cursor:"pointer",textAlign:"center"}}>
-              {i<STAGES.length-1&&<div style={{position:"absolute",right:-7,top:"50%",transform:"translateY(-50%)",color:D.textMuted,fontSize:14,zIndex:1,pointerEvents:"none"}}>›</div>}
-              <div style={{fontSize:18,marginBottom:4}}>{m.icon}</div>
-              <div style={{fontSize:10,fontWeight:600,color:active?m.text:D.textSub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{st}</div>
-              <div style={{fontSize:22,fontWeight:700,color:active?m.text:D.text,lineHeight:1.3,marginTop:2}}>{stageCounts[st]}</div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function BackHome({ switchTab }) {
-  return(
-    <button onClick={()=>switchTab("home")}
-      style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>
-      ← Home
-    </button>
-  );
-}
-function AddEditView({form,setForm,editMode,saveContact,setView}){
+// ── ADD/EDIT VIEW ─────────────────────────────────────────────────────────────
+function AddEditView({form,setForm,editMode,saveContact,setView,switchTab}){
   return(
     <div>
-      <button onClick={()=>setView(editMode?"detail":"contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:14,display:"flex",alignItems:"center",gap:6}}>← Back</button>
+      <BackHome switchTab={switchTab}/>
+      <button onClick={()=>setView(editMode?"detail":"contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>← Back</button>
       <h2 style={{margin:"0 0 22px",fontSize:24,fontWeight:700,color:D.text}}>{editMode?"Edit Contact":"New Contact"}</h2>
       <div style={{display:"flex",flexDirection:"column",gap:16,background:D.card,border:`1.5px solid ${D.border}`,borderRadius:12,padding:24}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
@@ -388,37 +348,235 @@ function ColdStatusCard({contact,onRevive}){
   );
 }
 
+// ── MEETING HISTORY ───────────────────────────────────────────────────────────
+function MeetingHistory({contactId,calLinks}){
+  const [meetings,setMeetings]=useState([]);
+  const [loading, setLoading] =useState(true);
+
+  // All keys linked to this contact
+  const linkedKeys=Object.entries(calLinks||{}).filter(([,cId])=>cId===contactId).map(([k])=>k);
+
+  useEffect(()=>{
+    if(!linkedKeys.length){ setLoading(false); return; }
+    const load=async()=>{
+      setLoading(true);
+      try{
+        const start=new Date(); start.setDate(start.getDate()-90);
+        const end  =new Date(); end.setDate(end.getDate()+30);
+        const fmt  =d=>d.toISOString().split(".")[0];
+        const res  =await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(start))+"&timeMax="+encodeURIComponent(fmt(end)));
+        const json =await res.json();
+        if(json.ok&&Array.isArray(json.events)){
+          const matched=json.events.filter(ev=>linkedKeys.includes(makeEvKey(ev)));
+          matched.sort((a,b)=>new Date(b.start?.dateTime||b.start?.date)-new Date(a.start?.dateTime||a.start?.date));
+          setMeetings(matched);
+        }
+      }catch{ setMeetings([]); }
+      setLoading(false);
+    };
+    load();
+  },[contactId,JSON.stringify(linkedKeys)]);
+
+  const fmtTime=ev=>{
+    const s=ev.start?.dateTime||ev.start?.date; if(!s) return"";
+    return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
+  };
+  const getDur=ev=>{
+    const s=new Date(ev.start?.dateTime||ev.start?.date);
+    const e=new Date(ev.end?.dateTime||ev.end?.date);
+    const m=Math.round((e-s)/60000);
+    if(m<60) return`${m}m`;
+    const h=Math.floor(m/60);const mm=m%60;
+    return mm>0?`${h}h ${mm}m`:`${h}h`;
+  };
+  const isPast=ev=>new Date(ev.start?.dateTime||ev.start?.date)<new Date();
+
+  if(loading) return<p style={{fontSize:13,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading meetings…</p>;
+  if(!linkedKeys.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>No linked meetings yet. Go to the Calendar tab, click an event and tap 🔗 Link to Contact.</p>;
+  if(!meetings.length)   return<p style={{fontSize:13,color:D.textMuted,margin:0}}>Linked meetings not found. Try re-linking from the Calendar tab.</p>;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {meetings.map((ev,i)=>{
+        const past=isPast(ev);
+        return(
+          <div key={i} style={{display:"flex",gap:12,padding:"10px 14px",borderRadius:10,background:D.surface,border:`1px solid ${past?D.border:D.accent+"44"}`}}>
+            <div style={{width:3,borderRadius:2,background:past?D.border:D.accent,flexShrink:0,alignSelf:"stretch"}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
+                <span style={{fontSize:13,fontWeight:600,color:past?D.textSub:D.text}}>{ev.summary||"(No title)"}</span>
+                <span style={{fontSize:10,fontWeight:600,color:past?"#3A5A3A":"#1A3A5A",background:past?"#0D1A0D":"#0D1A2E",padding:"1px 7px",borderRadius:20,border:`1px solid ${past?"#1A3A1A":"#1A3A5A"}`}}>
+                  {past?"Past":"Upcoming"}
+                </span>
+              </div>
+              <div style={{fontSize:12,color:D.textMuted}}>
+                📅 {fmtTime(ev)}
+                <span style={{marginLeft:10}}>⏱ {getDur(ev)}</span>
+                {ev.location&&<span style={{marginLeft:10}}>📍 {ev.location.length>40?ev.location.substring(0,40)+"…":ev.location}</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── DETAIL VIEW ───────────────────────────────────────────────────────────────
+function DetailView({selected,contacts,followups,setFollowups,setContacts,setView,setForm,setEditMode,deleteContact,addLog,newLog,setNewLog,addFollowup,newFU,setNewFU,showFU,setShowFU,logRef,onCompleteCadence,onMoveToCold,onRevive,switchTab,calLinks}){
+  if(!selected) return null;
+  const contact=contacts.find(c=>c.id===selected.id)||selected;
+  const cFU=followups.filter(f=>f.contactId===contact.id).sort((a,b)=>a.date.localeCompare(b.date));
+  const stageIdx=STAGES.indexOf(contact.stage);
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:4}}>
+        <BackHome switchTab={switchTab}/>
+        <button onClick={()=>setView("contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>← Contacts</button>
+      </div>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:22}}>
+        <div style={{display:"flex",gap:14,alignItems:"center"}}>
+          <div style={{width:54,height:54,borderRadius:"50%",background:stringToColor(contact.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff",flexShrink:0,opacity:contact.cold?0.6:1}}>{contact.name.charAt(0).toUpperCase()}</div>
+          <div>
+            <h2 style={{margin:0,fontSize:24,fontWeight:700,color:contact.cold?D.coldText:D.text,letterSpacing:"-0.3px"}}>{contact.name}</h2>
+            {contact.company&&<p style={{margin:"2px 0 6px",color:D.textSub,fontSize:14}}>{contact.company}</p>}
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              {contact.cold?<ColdBadge/>:<StageBadge stage={contact.stage} showDesc/>}
+              {!contact.cold&&<UrgencyBadge contact={contact}/>}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          {!contact.cold&&<button onClick={()=>{setForm({name:contact.name,company:contact.company||"",email:contact.email||"",phone:contact.phone||"",whatsapp:contact.whatsapp||"",linkedin:contact.linkedin||"",stage:contact.stage,notes:contact.notes||""});setEditMode(true);setView("add");}} style={S.btn2}>Edit</button>}
+          <button onClick={()=>{if(window.confirm("Delete this contact?"))deleteContact(contact.id);}} style={{...S.btn2,color:"#F87171",borderColor:"#3D1515"}}>Delete</button>
+        </div>
+      </div>
+      <ColdStatusCard contact={contact} onRevive={()=>onRevive(contact.id)}/>
+      {!contact.cold&&(
+        <div style={{...S.card}}>
+          <p style={{...S.secH,marginBottom:14}}>Pipeline Progress</p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4}}>
+            {STAGES.map(st=>{const m=STAGE_META[st];const isA=contact.stage===st;const isP=stageIdx>STAGES.indexOf(st);
+              return(<div key={st} style={{textAlign:"center"}}>
+                <div style={{height:4,borderRadius:2,background:isA||isP?m.dot:D.border,marginBottom:7}}/>
+                <div style={{fontSize:16,marginBottom:3}}>{m.icon}</div>
+                <div style={{fontSize:10,fontWeight:600,color:isA?m.text:isP?D.textSub:D.textMuted}}>{st}</div>
+              </div>);
+            })}
+          </div>
+        </div>
+      )}
+      <CadenceTracker contact={contact} onComplete={date=>onCompleteCadence(contact.id,date)} onMoveToCold={()=>onMoveToCold(contact.id)}/>
+      <div style={{...S.card}}>
+        <p style={S.secH}>Contact Info</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 20px"}}>
+          {contact.email    &&<InfoRow label="Email"    value={contact.email}    link={`mailto:${contact.email}`}/>}
+          {contact.phone    &&<InfoRow label="Phone"    value={contact.phone}/>}
+          {contact.whatsapp &&<InfoRow label="WhatsApp" value={contact.whatsapp} link={`https://wa.me/${contact.whatsapp.replace(/\D/g,"")}`}/>}
+          {contact.linkedin &&<InfoRow label="LinkedIn" value="View Profile"     link={contact.linkedin.startsWith("http")?contact.linkedin:`https://${contact.linkedin}`}/>}
+          {contact.notes    &&<div style={{gridColumn:"1/-1"}}><InfoRow label="Notes" value={contact.notes}/></div>}
+        </div>
+      </div>
+      {/* Meetings */}
+      <div style={{...S.card}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+          <p style={{...S.secH,margin:0}}>Meetings</p>
+          <button onClick={()=>switchTab("calendar")} style={{...S.btnSm,fontSize:11,padding:"3px 10px"}}>View Calendar →</button>
+        </div>
+        <MeetingHistory contactId={contact.id} calLinks={calLinks}/>
+      </div>
+      {/* Manual follow-ups */}
+      {!contact.cold&&(
+        <div style={{...S.card}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <p style={{...S.secH,margin:0}}>Manual Follow-ups</p>
+            <button onClick={()=>setShowFU(!showFU)} style={S.btnSm}>+ Schedule</button>
+          </div>
+          {showFU&&(
+            <div style={{background:D.surface,borderRadius:8,padding:14,marginBottom:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <div><label style={S.lbl}>Date</label><input type="date" value={newFU.date} onChange={e=>setNewFU(f=>({...f,date:e.target.value}))} style={{...S.inp,width:"auto",colorScheme:"dark"}}/></div>
+              <div style={{flex:1,minWidth:150}}><label style={S.lbl}>Note (optional)</label><input placeholder="What to discuss…" value={newFU.note} onChange={e=>setNewFU(f=>({...f,note:e.target.value}))} style={S.inp}/></div>
+              <button onClick={()=>addFollowup(contact.id)} style={S.btn1}>Add</button>
+              <button onClick={()=>setShowFU(false)} style={S.btn2}>Cancel</button>
+            </div>
+          )}
+          {cFU.length===0
+            ?<p style={{fontSize:14,color:D.textMuted,margin:0}}>No manual follow-ups scheduled</p>
+            :<div style={{display:"flex",flexDirection:"column",gap:7}}>
+              {cFU.map(fu=>{
+                const u=!fu.done?getDateUrgency(fu.date):null;
+                return(
+                  <div key={fu.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,background:isOverdue(fu.date)&&!fu.done?"#120800":D.surface,border:`1px solid ${isOverdue(fu.date)&&!fu.done?"#4A2E00":D.border}`}}>
+                    <input type="checkbox" checked={fu.done} onChange={()=>setFollowups(fs=>fs.map(f=>f.id===fu.id?{...f,done:!f.done}:f))} style={{width:15,height:15,cursor:"pointer",accentColor:D.accent}}/>
+                    <div style={{flex:1}}>
+                      <span style={{fontSize:13,fontWeight:600,color:fu.done?D.textMuted:isOverdue(fu.date)?"#FCD34D":D.text,textDecoration:fu.done?"line-through":"none"}}>{isToday(fu.date)?"Today":formatDate(fu.date)}</span>
+                      {fu.note&&<p style={{margin:"2px 0 0",fontSize:13,color:fu.done?D.textMuted:D.textSub}}>{fu.note}</p>}
+                    </div>
+                    {!fu.done&&u&&<RawUrgencyBadge u={u}/>}
+                    <button onClick={()=>setFollowups(fs=>fs.filter(f=>f.id!==fu.id))} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:18,padding:0,lineHeight:1}}>×</button>
+                  </div>
+                );
+              })}
+            </div>
+          }
+        </div>
+      )}
+      {/* Conversation log */}
+      <div style={{...S.card}}>
+        <p style={S.secH}>Conversation Log</p>
+        <div style={{display:"flex",gap:8,marginBottom:14}}>
+          <textarea ref={logRef} value={newLog} onChange={e=>setNewLog(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();addLog(contact.id);}}}
+            placeholder="Log a note or conversation… (Enter to save)"
+            style={{flex:1,padding:"10px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",resize:"none",height:70,outline:"none",background:D.surface,color:D.text}}/>
+          <button onClick={()=>addLog(contact.id)} style={{...S.btn1,alignSelf:"flex-end"}}>Save</button>
+        </div>
+        {(!contact.conversations||!contact.conversations.length)
+          ?<p style={{fontSize:14,color:D.textMuted,margin:0}}>No conversations logged yet</p>
+          :<div>
+            {contact.conversations.map((cv,i)=>(
+              <div key={cv.id} style={{display:"flex",gap:12,paddingBottom:13,marginBottom:i<contact.conversations.length-1?13:0,borderBottom:i<contact.conversations.length-1?`1px solid ${D.border}`:"none"}}>
+                <div style={{width:2,background:D.borderHi,borderRadius:2,flexShrink:0,marginTop:4}}/>
+                <div style={{flex:1}}>
+                  <p style={{margin:"0 0 4px",fontSize:14,color:D.text,lineHeight:1.6}}>{cv.text}</p>
+                  <span style={{fontSize:12,color:D.textMuted}}>{new Date(cv.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"})}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        }
+      </div>
+    </div>
+  );
+}
+function SafeDetailView(props){
+  return(
+    <ErrorBoundary onBack={()=>props.setView("contacts")}>
+      <DetailView {...props}/>
+    </ErrorBoundary>
+  );
+}
+
 // ── CALENDAR VIEW ─────────────────────────────────────────────────────────────
 const HOURS=Array.from({length:24},(_,i)=>i);
 const CAL_COLORS=["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#EF4444","#6366F1"];
 function calColor(str){let h=0;for(let i=0;i<str.length;i++)h=str.charCodeAt(i)+((h<<5)-h);return CAL_COLORS[Math.abs(h)%CAL_COLORS.length];}
 
-// When linking, store a key based on title+date instead of the unreliable event ID
-const makeEvKey=(ev)=>{
-  const dt=ev.start?.dateTime||ev.start?.date||"";
-  const date=dt.split("T")[0];
-  return`${(ev.summary||"").trim().toLowerCase()}::${date}`;
-};
-
-const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:""});
+function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
   const todayDate=new Date();todayDate.setHours(0,0,0,0);
+  const getWeekStart=d=>{const dt=new Date(d);dt.setHours(0,0,0,0);const day=dt.getDay();dt.setDate(dt.getDate()+(day===0?-6:1-day));return dt;};
 
-  const getWeekStart=d=>{
-    const dt=new Date(d);dt.setHours(0,0,0,0);
-    const day=dt.getDay();dt.setDate(dt.getDate()+(day===0?-6:1-day));return dt;
-  };
-
-  const [weekStart,  setWeekStart]  = useState(()=>getWeekStart(new Date()));
-  const [monthBase,  setMonthBase]  = useState(()=>{const d=new Date();d.setDate(1);d.setHours(0,0,0,0);return d;});
-  const [events,     setEvents]     = useState([]);
-  const [loading,    setLoading]    = useState(false);
-  const [selectedEv, setSelectedEv] = useState(null);
-  const [showNew,    setShowNew]    = useState(false);
-  const [newEv,      setNewEv]      = useState(emptyNewEv());
-  const [saving,     setSaving]     = useState(false);
-  const [evErr,      setEvErr]      = useState("");
-  const [linkSearch, setLinkSearch] = useState("");
-  const [showLink,   setShowLink]   = useState(false);
+  const[weekStart,  setWeekStart] =useState(()=>getWeekStart(new Date()));
+  const[monthBase,  setMonthBase] =useState(()=>{const d=new Date();d.setDate(1);d.setHours(0,0,0,0);return d;});
+  const[events,     setEvents]    =useState([]);
+  const[loading,    setLoading]   =useState(false);
+  const[selectedEv, setSelectedEv]=useState(null);
+  const[showNew,    setShowNew]   =useState(false);
+  const[newEv,      setNewEv]     =useState(emptyNewEv());
+  const[saving,     setSaving]    =useState(false);
+  const[evErr,      setEvErr]     =useState("");
+  const[linkSearch, setLinkSearch]=useState("");
+  const[showLink,   setShowLink]  =useState(false);
   const gridRef=useRef(null);
 
   useEffect(()=>{if(gridRef.current)gridRef.current.scrollTop=8*56;},[]);
@@ -432,55 +590,31 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
       const fmt=d=>d.toISOString().split(".")[0];
       const res=await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(weekStart))+"&timeMax="+encodeURIComponent(fmt(end)));
       const json=await res.json();
-      if(json.ok&&Array.isArray(json.events)){setEvents(json.events);}
-      else{setEvents([]);}
+      if(json.ok&&Array.isArray(json.events)) setEvents(json.events);
+      else setEvents([]);
     }catch{setEvents([]);}
     setLoading(false);
   },[weekStart]);
 
   useEffect(()=>{fetchEvents();},[fetchEvents]);
 
-  // Create event via API
-  // Creates event silently via Apps Script — no new tab needed
   const createEvent=async(local)=>{
     if(!local.title.trim()||!local.date||!local.startTime){setEvErr("Title, date and start time are required.");return;}
     setSaving(true);setEvErr("");
     try{
       const inviteesArr=local.invitees?local.invitees.split(",").map(s=>s.trim()).filter(Boolean):[];
-      const res=await fetch(APPS_SCRIPT_URL,{
-        method:"POST",
-        body:JSON.stringify({
-          action:"createEvent",
-          event:{
-            title:local.title,
-            date:local.date,
-            startTime:local.startTime,
-            endTime:local.endTime||"",
-            invitees:inviteesArr,
-            location:local.link||"",
-            description:"",
-          }
-        })
-      });
+      const res=await fetch(APPS_SCRIPT_URL,{method:"POST",body:JSON.stringify({action:"createEvent",event:{title:local.title,date:local.date,startTime:local.startTime,endTime:local.endTime||"",invitees:inviteesArr,location:local.link||"",description:""}})});
       const json=await res.json();
-      if(!json.ok) throw new Error(json.error||"Failed to create event");
+      if(!json.ok) throw new Error(json.error||"Failed");
       setShowNew(false);setNewEv(emptyNewEv());
       setTimeout(()=>fetchEvents(),2000);
-    }catch(e){
-      setEvErr("Could not create event: "+e.message);
-    }
+    }catch(e){setEvErr("Could not create event: "+e.message);}
     setSaving(false);
   };
 
   const openNew=(date="",startTime="")=>{
-    // Calculate end time as start + 1 hour properly
-    const endTime = startTime ? (()=>{
-      const [hh,mm] = startTime.split(":");
-      const endHour = (parseInt(hh)+1)%24;
-      return String(endHour).padStart(2,"0")+":"+mm;
-    })() : "10:00";
-    setNewEv({...emptyNewEv(),date,startTime,endTime});
-    setEvErr("");setShowNew(true);
+    const endTime=startTime?(()=>{const[hh,mm]=startTime.split(":");return String((parseInt(hh)+1)%24).padStart(2,"0")+":"+mm;})():"10:00";
+    setNewEv({...emptyNewEv(),date,startTime,endTime});setEvErr("");setShowNew(true);
   };
 
   const prevWeek=()=>{const d=new Date(weekStart);d.setDate(d.getDate()-7);setWeekStart(d);};
@@ -491,30 +625,22 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
     const ds=day.toISOString().split("T")[0];
     return events.filter(ev=>{
       const raw=ev.start?.dateTime||ev.start?.date||"";
-      const evDate=new Date(raw);
-      const evDs=evDate.toLocaleDateString("en-CA",{timeZone:"America/New_York"}); // YYYY-MM-DD in ET
-      return evDs===ds;
+      return new Date(raw).toLocaleDateString("en-CA",{timeZone:"America/New_York"})===ds;
     });
   };
   const evStyle=ev=>{
-    const s=new Date(ev.start?.dateTime||ev.start?.date);
-    const e=new Date(ev.end?.dateTime||ev.end?.date);
-    // Convert to local ET hours for positioning
-    const sET=new Date(s.toLocaleString("en-US",{timeZone:"America/New_York"}));
-    const eET=new Date(e.toLocaleString("en-US",{timeZone:"America/New_York"}));
-    const sm=sET.getHours()*60+sET.getMinutes();
-    const em=eET.getHours()*60+eET.getMinutes();
+    const s=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
+    const e=new Date(new Date(ev.end?.dateTime||ev.end?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
+    const sm=s.getHours()*60+s.getMinutes();const em=e.getHours()*60+e.getMinutes();
     return{top:(sm/60)*56,height:Math.max(((em-sm)/60)*56,22),color:calColor(ev.summary||"event")};
   };
   const fmtHour=h=>{const p=h<12?"AM":"PM";const hr=h===0?12:h>12?h-12:h;return`${hr} ${p}`;};
-  const fmtTime=dt=>{if(!dt)return"";return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});};
+  const fmtTime=dt=>{if(!dt)return"";return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});};
   const weekLabel=`${weekStart.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${weekDays[6].toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;
 
-  // ── Month mini ──────────────────────────────────────────────────────────────
   const MonthMini=()=>{
     const yr=monthBase.getFullYear();const mo=monthBase.getMonth();
-    const firstDay=new Date(yr,mo,1).getDay();
-    const dim=new Date(yr,mo+1,0).getDate();
+    const firstDay=new Date(yr,mo,1).getDay();const dim=new Date(yr,mo+1,0).getDate();
     const cells=Array.from({length:firstDay+dim},(_,i)=>i<firstDay?null:i-firstDay+1);
     while(cells.length%7!==0)cells.push(null);
     const inWeek=d=>{if(!d)return false;const dt=new Date(yr,mo,d);dt.setHours(0,0,0,0);return dt>=weekStart&&dt<new Date(weekStart.getTime()+7*86400000);};
@@ -547,7 +673,7 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
             {events.slice(0,8).map(ev=>{
               const color=calColor(ev.summary||"event");
               return(
-                <div key={ev.id} onClick={()=>setSelectedEv(ev)} style={{display:"flex",gap:7,alignItems:"flex-start",cursor:"pointer",padding:"3px 0"}}>
+                <div key={ev.id||ev.summary} onClick={()=>setSelectedEv(ev)} style={{display:"flex",gap:7,alignItems:"flex-start",cursor:"pointer",padding:"3px 0"}}>
                   <div style={{width:3,borderRadius:2,background:color,flexShrink:0,marginTop:3,height:30}}/>
                   <div style={{minWidth:0}}>
                     <div style={{fontSize:11,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{ev.summary||"(No title)"}</div>
@@ -562,11 +688,11 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
     );
   };
 
-  // ── Event popup ─────────────────────────────────────────────────────────────
   const EventPopup=()=>{
     if(!selectedEv) return null;
     const ev=selectedEv;
-    const linkedId=calLinks[makeEvKey(ev)];
+    const evKey=makeEvKey(ev);
+    const linkedId=calLinks[evKey];
     const linked=linkedId?contacts.find(c=>c.id===linkedId):null;
     const color=calColor(ev.summary||"event");
     return(
@@ -578,7 +704,7 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
               <span style={{fontWeight:700,fontSize:14,color:D.text}}>{ev.summary||"(No title)"}</span>
             </div>
             <div style={{fontSize:12,color:D.textSub}}>{fmtTime(ev.start?.dateTime)} – {fmtTime(ev.end?.dateTime)}</div>
-            {ev.location&&<div style={{fontSize:12,color:D.textMuted,marginTop:3}}>📍 {ev.location}</div>}
+            {ev.location&&<div style={{fontSize:12,color:D.textMuted,marginTop:3}}>📍 {ev.location.length>40?ev.location.substring(0,40)+"…":ev.location}</div>}
             {ev.numAttendees>0&&<div style={{fontSize:12,color:D.textMuted,marginTop:2}}>👥 {ev.numAttendees} attendees</div>}
           </div>
           <button onClick={()=>{setSelectedEv(null);setShowLink(false);}} style={{background:"none",border:"none",color:D.textMuted,cursor:"pointer",fontSize:20,lineHeight:1,padding:0}}>×</button>
@@ -587,7 +713,7 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,background:"#0D1828",border:`1px solid ${D.border}`,marginBottom:10}}>
             <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>{linked.name.charAt(0).toUpperCase()}</div>
             <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{linked.name}</span>
-            <button onClick={()=>setCalLinks(p=>{const n={...p};delete n[makeEvKey(ev)];return n;})} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
+            <button onClick={()=>setCalLinks(p=>{const n={...p};delete n[evKey];return n;})} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
           </div>
         ):(
           <button onClick={()=>setShowLink(v=>!v)} style={{...S.btnSm,fontSize:12,color:D.accent,borderColor:D.accent+"66",width:"100%",marginBottom:10}}>🔗 Link to Contact</button>
@@ -598,7 +724,7 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
               style={{...S.inp,padding:"6px 10px",fontSize:12,borderRadius:0,border:"none",borderBottom:`1px solid ${D.border}`}}/>
             <div style={{maxHeight:150,overflowY:"auto"}}>
               {contacts.filter(c=>!c.cold&&(c.name.toLowerCase().includes(linkSearch.toLowerCase())||(c.company||"").toLowerCase().includes(linkSearch.toLowerCase()))).map(c=>(
-                <div key={c.id} onClick={()=>{setCalLinks(p=>({...p,[ev.id]:c.id}));setShowLink(false);setLinkSearch("");}}
+                <div key={c.id} onClick={()=>{setCalLinks(p=>({...p,[evKey]:c.id}));setShowLink(false);setLinkSearch("");}}
                   style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",cursor:"pointer",borderBottom:`1px solid ${D.border}`}}
                   onMouseEnter={e=>e.currentTarget.style.background="#1A2535"}
                   onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -614,16 +740,10 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
     );
   };
 
-  // ── New Event Modal ──────────────────────────────────────────────────────────
   const NewEventModal=()=>{
     if(!showNew) return null;
-    // Local state so typing is completely isolated — no re-renders from parent
-    const [local, setLocal] = useState(newEv);
-    const update=k=>e=>setLocal(p=>({...p,[k]:e.target.value}));
-    const handleCreate=()=>{
-      setNewEv(local);
-      createEvent(local);
-    };
+    const[local,setLocal]=useState(newEv);
+    const upd=k=>e=>setLocal(p=>({...p,[k]:e.target.value}));
     return(
       <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
         onClick={e=>{if(e.target===e.currentTarget){setShowNew(false);setEvErr("");}}}>
@@ -633,44 +753,23 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
             <button onClick={()=>{setShowNew(false);setEvErr("");}} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <div>
-              <label style={S.lbl}>Title *</label>
-              <input value={local.title} onChange={update("title")} placeholder="Meeting title" style={S.inp} autoFocus/>
-            </div>
-            <div>
-              <label style={S.lbl}>Date *</label>
-              <input type="date" value={local.date} onChange={update("date")} style={{...S.inp,colorScheme:"dark"}}/>
-            </div>
+            <div><label style={S.lbl}>Title *</label><input value={local.title} onChange={upd("title")} placeholder="Meeting title" style={S.inp} autoFocus/></div>
+            <div><label style={S.lbl}>Date *</label><input type="date" value={local.date} onChange={upd("date")} style={{...S.inp,colorScheme:"dark"}}/></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <div>
-                <label style={S.lbl}>Start Time *</label>
-                <input type="time" value={local.startTime} onChange={update("startTime")} style={{...S.inp,colorScheme:"dark"}}/>
-              </div>
-              <div>
-                <label style={S.lbl}>End Time</label>
-                <input type="time" value={local.endTime} onChange={update("endTime")} style={{...S.inp,colorScheme:"dark"}}/>
-              </div>
+              <div><label style={S.lbl}>Start Time *</label><input type="time" value={local.startTime} onChange={upd("startTime")} style={{...S.inp,colorScheme:"dark"}}/></div>
+              <div><label style={S.lbl}>End Time</label><input type="time" value={local.endTime} onChange={upd("endTime")} style={{...S.inp,colorScheme:"dark"}}/></div>
             </div>
             <div>
               <label style={S.lbl}>Invitees <span style={{color:D.textMuted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label>
-              <input
-                value={local.invitees}
-                onChange={update("invitees")}
-                placeholder="email1@example.com, email2@example.com"
-                style={S.inp}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-              />
+              <input value={local.invitees} onChange={upd("invitees")} placeholder="email1@example.com, email2@example.com" style={S.inp} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}/>
             </div>
             <div>
               <label style={S.lbl}>Meeting Link <span style={{color:D.textMuted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label>
-              <input value={local.link} onChange={update("link")} placeholder="https://meet.google.com/… or leave blank" style={S.inp}/>
+              <input value={local.link} onChange={upd("link")} placeholder="https://meet.google.com/… or leave blank" style={S.inp}/>
             </div>
             {evErr&&<p style={{fontSize:12,color:D.red,margin:0}}>{evErr}</p>}
             <div style={{display:"flex",gap:10,marginTop:4}}>
-              <button onClick={handleCreate} disabled={saving} style={{...S.btn1,flex:1}}>{saving?"Creating…":"Create Event"}</button>
+              <button onClick={()=>createEvent(local)} disabled={saving} style={{...S.btn1,flex:1}}>{saving?"Creating…":"Create Event"}</button>
               <button onClick={()=>{setShowNew(false);setEvErr("");}} style={S.btn2}>Cancel</button>
             </div>
           </div>
@@ -697,11 +796,9 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
           <button onClick={fetchEvents} style={{...S.btnSm,fontSize:12}} disabled={loading}>⟳</button>
         </div>
       </div>
-
       <div style={{display:"flex",gap:20,flex:1,minHeight:0}}>
         <MonthMini/>
         <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
-          {/* Day headers */}
           <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)",borderBottom:`1px solid ${D.border}`,flexShrink:0}}>
             <div/>
             {weekDays.map((d,i)=>{
@@ -714,7 +811,6 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
               );
             })}
           </div>
-          {/* Time grid */}
           <div ref={gridRef} style={{flex:1,overflowY:"auto"}}>
             <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)"}}>
               {HOURS.map(h=>(
@@ -723,17 +819,19 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
                   {weekDays.map((d,di)=>{
                     const isTd=d.getTime()===todayDate.getTime();
                     const ds=d.toISOString().split("T")[0];
-                    const hStr=String(h).padStart(2,"0");
                     return(
                       <div key={di}
                         style={{height:56,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}}
-                        onDoubleClick={()=>openNew(ds,`${hStr}:00`)}
-                      >
-                        {eventsForDay(d).filter(ev=>new Date(ev.start?.dateTime||ev.start?.date).getHours()===h).map(ev=>{
+                        onDoubleClick={()=>openNew(ds,String(h).padStart(2,"0")+":00")}>
+                        {eventsForDay(d).filter(ev=>{
+                          const dt=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
+                          return dt.getHours()===h;
+                        }).map((ev,ei)=>{
                           const{top,height,color}=evStyle(ev);
-                          const linked=calLinks[makeEvKey(ev)]?contacts.find(c=>c.id===calLinks[makeEvKey(ev)]):null;
+                          const evKey=makeEvKey(ev);
+                          const linked=calLinks[evKey]?contacts.find(c=>c.id===calLinks[evKey]):null;
                           return(
-                            <div key={ev.id}
+                            <div key={ei}
                               onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
                               style={{position:"absolute",left:2,right:2,top:top-(h*56),height,background:color+"33",border:`1.5px solid ${color}`,borderRadius:5,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"2px 5px"}}>
                               <div style={{fontSize:10,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
@@ -758,43 +856,40 @@ const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invite
 }
 
 // ── HOME VIEW ─────────────────────────────────────────────────────────────────
-function HomeView({ contacts, followups, switchTab, setFilterStage, onAddContact }) {
-  const activeContacts = contacts.filter(c=>!c.cold);
-  const coldContacts   = contacts.filter(c=>c.cold);
-  const [upcomingEvs,  setUpcomingEvs]  = useState([]);
-  const [loadingEvs,   setLoadingEvs]   = useState(true);
+function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
+  const activeContacts=contacts.filter(c=>!c.cold);
+  const coldContacts=contacts.filter(c=>c.cold);
+  const[upcomingEvs, setUpcomingEvs]=useState([]);
+  const[loadingEvs,  setLoadingEvs] =useState(true);
 
-  const urgentCount = activeContacts.filter(c=>{ const u=getUrgency(c); return u&&(u.level==="overdue"||u.level==="today"); }).length
-    + followups.filter(f=>{ if(f.done||!f.date) return false; const u=getDateUrgency(f.date); return u.level==="overdue"||u.level==="today"; }).length;
-  const coldDueCount = coldContacts.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)<=0).length;
-  const stageCounts  = STAGES.reduce((a,s)=>({...a,[s]:activeContacts.filter(c=>c.stage===s).length}),{});
+  const urgentCount=activeContacts.filter(c=>{const u=getUrgency(c);return u&&(u.level==="overdue"||u.level==="today");}).length
+    +followups.filter(f=>{if(f.done||!f.date)return false;const u=getDateUrgency(f.date);return u.level==="overdue"||u.level==="today";}).length;
+  const coldDueCount=coldContacts.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)<=0).length;
+  const stageCounts=STAGES.reduce((a,s)=>({...a,[s]:activeContacts.filter(c=>c.stage===s).length}),{});
 
-  // Fetch next 7 days of events via Apps Script
   useEffect(()=>{
     const load=async()=>{
       setLoadingEvs(true);
       try{
-        const now=new Date();
-        const end=new Date();end.setDate(end.getDate()+7);
+        const now=new Date();const end=new Date();end.setDate(end.getDate()+7);
         const fmt=d=>d.toISOString().split(".")[0];
         const res=await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(now))+"&timeMax="+encodeURIComponent(fmt(end)));
         const json=await res.json();
         if(json.ok&&Array.isArray(json.events)) setUpcomingEvs(json.events.slice(0,4));
         else setUpcomingEvs([]);
-      }catch{ setUpcomingEvs([]); }
+      }catch{setUpcomingEvs([]);}
       setLoadingEvs(false);
     };
     load();
   },[]);
 
-  const fmtEvTime=dt=>{
-    if(!dt) return"";
-    return new Date(dt).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
+  const fmtEvTime=ev=>{
+    const s=ev.start?.dateTime||ev.start?.date;if(!s)return"";
+    return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
   };
 
   return(
     <div>
-      {/* Greeting */}
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24}}>
         <div>
           <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>👋 Welcome back</h1>
@@ -802,10 +897,8 @@ function HomeView({ contacts, followups, switchTab, setFilterStage, onAddContact
             {urgentCount>0?`You have ${urgentCount} urgent follow-up${urgentCount>1?"s":""} today`:"You're all caught up today 🎉"}
           </p>
         </div>
-        <button onClick={()=>onAddContact()} style={S.btn1}>+ Add Contact</button>
+        <button onClick={onAddContact} style={S.btn1}>+ Add Contact</button>
       </div>
-
-      {/* Stat boxes */}
       <div style={{...S.card}}>
         <p style={{margin:"0 0 12px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Your Pipeline</p>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
@@ -827,18 +920,14 @@ function HomeView({ contacts, followups, switchTab, setFilterStage, onAddContact
             {coldDueCount>0&&<div style={{fontSize:9,color:"#7AB8D4",marginTop:1}}>{coldDueCount} due</div>}
           </button>
         </div>
-
-        {/* Divider */}
         <div style={{height:1,background:D.border,marginBottom:12}}/>
-
-        {/* Pipeline stages */}
         <p style={{margin:"0 0 10px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Stages</p>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
           {STAGES.map((st,i)=>{
             const m=STAGE_META[st];
             return(
-              <button key={st} onClick={()=>{ setFilterStage(st); switchTab("contacts"); }}
-                style={{position:"relative",background:"transparent",border:`1.5px solid ${D.border}`,borderRadius:8,padding:"10px 6px",cursor:"pointer",textAlign:"center",transition:"all .15s"}}
+              <button key={st} onClick={()=>{setFilterStage(st);switchTab("contacts");}}
+                style={{position:"relative",background:"transparent",border:`1.5px solid ${D.border}`,borderRadius:8,padding:"10px 6px",cursor:"pointer",textAlign:"center"}}
                 onMouseEnter={e=>{e.currentTarget.style.background=m.bg;e.currentTarget.style.borderColor=m.dot;}}
                 onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor=D.border;}}>
                 {i<STAGES.length-1&&<div style={{position:"absolute",right:-7,top:"50%",transform:"translateY(-50%)",color:D.textMuted,fontSize:14,zIndex:1,pointerEvents:"none"}}>›</div>}
@@ -850,27 +939,23 @@ function HomeView({ contacts, followups, switchTab, setFilterStage, onAddContact
           })}
         </div>
       </div>
-
-      {/* Upcoming calendar events */}
       <div style={{...S.card}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
           <p style={{margin:0,fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Upcoming Events</p>
           <button onClick={()=>switchTab("calendar")} style={{...S.btnSm,fontSize:11,padding:"3px 10px"}}>View Calendar →</button>
         </div>
         {loadingEvs&&<p style={{fontSize:13,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading…</p>}
-        {!loadingEvs&&upcomingEvs.length===0&&(
-          <p style={{fontSize:13,color:D.textMuted,margin:0}}>No upcoming events in the next 7 days.</p>
-        )}
+        {!loadingEvs&&upcomingEvs.length===0&&<p style={{fontSize:13,color:D.textMuted,margin:0}}>No upcoming events in the next 7 days.</p>}
         {!loadingEvs&&upcomingEvs.length>0&&(
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {upcomingEvs.map(ev=>{
-              const color=["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#EF4444","#6366F1"][Math.abs(ev.summary?.split("").reduce((h,c)=>c.charCodeAt(0)+((h<<5)-h),0)||0)%8];
+            {upcomingEvs.map((ev,i)=>{
+              const color=calColor(ev.summary||"event");
               return(
-                <div key={ev.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:D.surface,border:`1px solid ${D.border}`}}>
+                <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:D.surface,border:`1px solid ${D.border}`}}>
                   <div style={{width:3,height:36,borderRadius:2,background:color,flexShrink:0}}/>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.summary||"(No title)"}</div>
-                    <div style={{fontSize:11,color:D.textMuted,marginTop:2}}>{fmtEvTime(ev.start?.dateTime)}</div>
+                    <div style={{fontSize:11,color:D.textMuted,marginTop:2}}>{fmtEvTime(ev)}</div>
                   </div>
                 </div>
               );
@@ -942,11 +1027,12 @@ function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTa
   }).filter(Boolean);
   const allItems=[...withCadence,...manualItems].sort((a,b)=>(a.u?a.u.diff:999)-(b.u?b.u.diff:999));
   const overdue=allItems.filter(x=>x.u&&x.u.level==="overdue");
-  const today=allItems.filter(x=>x.u&&x.u.level==="today");
-  const soon=allItems.filter(x=>x.u&&x.u.level==="soon");
+  const today  =allItems.filter(x=>x.u&&x.u.level==="today");
+  const soon   =allItems.filter(x=>x.u&&x.u.level==="soon");
   const upcoming=allItems.filter(x=>x.u&&!["overdue","today","soon"].includes(x.u.level));
+
   const Section=({title,color,items})=>{
-    if(!items.length)return null;
+    if(!items.length) return null;
     return(
       <div style={{marginBottom:22}}>
         <p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color,textTransform:"uppercase",letterSpacing:0.8}}>{title} · {items.length}</p>
@@ -976,6 +1062,7 @@ function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTa
       </div>
     );
   };
+
   return(
     <div>
       <BackHome switchTab={switchTab}/>
@@ -1003,206 +1090,12 @@ function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTa
   );
 }
 
-// ── MEETING HISTORY ───────────────────────────────────────────────────────────
-function MeetingHistory({ contactId, calLinks }) {
-  const [meetings, setMeetings] = useState([]);
-  const [loading,  setLoading]  = useState(true);
-
-  useEffect(()=>{
-    const load=async()=>{
-      setLoading(true);
-      try{
-        // Fetch last 90 days + next 30 days
-        const start=new Date(); start.setDate(start.getDate()-90);
-        const end=new Date();   end.setDate(end.getDate()+30);
-        const fmt=d=>d.toISOString().split(".")[0];
-        const res=await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(start))+"&timeMax="+encodeURIComponent(fmt(end)));
-        const json=await res.json();
-        if(json.ok&&Array.isArray(json.events)){
-          // Filter to only events linked to this contact
-          const linked=json.events.filter(ev=>calLinks[ev.id]===contactId);
-          // Sort newest first
-          linked.sort((a,b)=>new Date(b.start?.dateTime||b.start?.date)-new Date(a.start?.dateTime||a.start?.date));
-          setMeetings(linked);
-        }
-      }catch{ setMeetings([]); }
-      setLoading(false);
-    };
-    load();
-  },[contactId,calLinks]);
-
-  const fmtMeetingTime=ev=>{
-    const s=ev.start?.dateTime||ev.start?.date;
-    if(!s) return"";
-    return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
-  };
-
-  const getMeetingDuration=ev=>{
-    const s=new Date(ev.start?.dateTime||ev.start?.date);
-    const e=new Date(ev.end?.dateTime||ev.end?.date);
-    const mins=Math.round((e-s)/60000);
-    if(mins<60) return`${mins}m`;
-    const h=Math.floor(mins/60); const m=mins%60;
-    return m>0?`${h}h ${m}m`:`${h}h`;
-  };
-
-  const isPast=ev=>new Date(ev.start?.dateTime||ev.start?.date)<new Date();
-
-  if(loading) return<p style={{fontSize:13,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading meetings…</p>;
-  if(!meetings.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>No linked meetings yet. Link events from the Calendar tab.</p>;
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-      {meetings.map(ev=>{
-        const past=isPast(ev);
-        const color=past?D.textMuted:D.accent;
-        return(
-          <div key={ev.id} style={{display:"flex",gap:12,padding:"10px 14px",borderRadius:10,background:D.surface,border:`1px solid ${past?D.border:D.accent+"44"}`}}>
-            <div style={{width:3,borderRadius:2,background:past?D.border:D.accent,flexShrink:0,alignSelf:"stretch"}}/>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
-                <span style={{fontSize:13,fontWeight:600,color:past?D.textSub:D.text}}>{ev.summary||"(No title)"}</span>
-                <span style={{fontSize:10,fontWeight:600,color:past?"#3A5A3A":"#1A3A5A",background:past?"#0D1A0D":"#0D1A2E",padding:"1px 7px",borderRadius:20,border:`1px solid ${past?"#1A3A1A":"#1A3A5A"}`}}>
-                  {past?"Past":"Upcoming"}
-                </span>
-              </div>
-              <div style={{fontSize:12,color:D.textMuted}}>
-                📅 {fmtMeetingTime(ev)}
-                <span style={{marginLeft:10}}>⏱ {getMeetingDuration(ev)}</span>
-                {ev.location&&<span style={{marginLeft:10}}>📍 {ev.location}</span>}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── DETAIL VIEW ───────────────────────────────────────────────────────────────
-function DetailView({selected,contacts,followups,setFollowups,setContacts,setView,setForm,setEditMode,deleteContact,addLog,newLog,setNewLog,addFollowup,newFU,setNewFU,showFU,setShowFU,logRef,onCompleteCadence,onMoveToCold,onRevive,switchTab,calLinks}){
-  if(!selected)return null;
-  const contact=contacts.find(c=>c.id===selected.id)||selected;
-  const cFU=followups.filter(f=>f.contactId===contact.id).sort((a,b)=>a.date.localeCompare(b.date));
-  const stageIdx=STAGES.indexOf(contact.stage);
-  return(
-    <div>
-      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:4}}>
-        <BackHome switchTab={switchTab}/>
-        <button onClick={()=>setView("contacts")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>← Contacts</button>
-      </div>
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:22}}>
-        <div style={{display:"flex",gap:14,alignItems:"center"}}>
-          <div style={{width:54,height:54,borderRadius:"50%",background:stringToColor(contact.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff",flexShrink:0,opacity:contact.cold?0.6:1}}>{contact.name.charAt(0).toUpperCase()}</div>
-          <div>
-            <h2 style={{margin:0,fontSize:24,fontWeight:700,color:contact.cold?D.coldText:D.text,letterSpacing:"-0.3px"}}>{contact.name}</h2>
-            {contact.company&&<p style={{margin:"2px 0 6px",color:D.textSub,fontSize:14}}>{contact.company}</p>}
-            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-              {contact.cold?<ColdBadge/>:<StageBadge stage={contact.stage} showDesc/>}
-              {!contact.cold&&<UrgencyBadge contact={contact}/>}
-            </div>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          {!contact.cold&&<button onClick={()=>{setForm({name:contact.name,company:contact.company||"",email:contact.email||"",phone:contact.phone||"",whatsapp:contact.whatsapp||"",linkedin:contact.linkedin||"",stage:contact.stage,notes:contact.notes||""});setEditMode(true);setView("add");}} style={S.btn2}>Edit</button>}
-          <button onClick={()=>{if(window.confirm("Delete this contact?"))deleteContact(contact.id);}} style={{...S.btn2,color:"#F87171",borderColor:"#3D1515"}}>Delete</button>
-        </div>
-      </div>
-      <ColdStatusCard contact={contact} onRevive={()=>onRevive(contact.id)}/>
-      {!contact.cold&&(
-        <div style={{...S.card}}>
-          <p style={{...S.secH,marginBottom:14}}>Pipeline Progress</p>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4}}>
-            {STAGES.map(st=>{const m=STAGE_META[st];const isA=contact.stage===st;const isP=stageIdx>STAGES.indexOf(st);
-              return(<div key={st} style={{textAlign:"center"}}>
-                <div style={{height:4,borderRadius:2,background:isA||isP?m.dot:D.border,marginBottom:7}}/>
-                <div style={{fontSize:16,marginBottom:3}}>{m.icon}</div>
-                <div style={{fontSize:10,fontWeight:600,color:isA?m.text:isP?D.textSub:D.textMuted}}>{st}</div>
-              </div>);
-            })}
-          </div>
-        </div>
-      )}
-      <CadenceTracker contact={contact} onComplete={date=>onCompleteCadence(contact.id,date)} onMoveToCold={()=>onMoveToCold(contact.id)}/>
-      <div style={{...S.card}}>
-        <p style={S.secH}>Contact Info</p>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 20px"}}>
-          {contact.email    &&<InfoRow label="Email"    value={contact.email} link={`mailto:${contact.email}`}/>}
-          {contact.phone    &&<InfoRow label="Phone"    value={contact.phone}/>}
-          {contact.whatsapp &&<InfoRow label="WhatsApp" value={contact.whatsapp} link={`https://wa.me/${contact.whatsapp.replace(/\D/g,"")}`}/>}
-          {contact.linkedin &&<InfoRow label="LinkedIn" value="View Profile" link={contact.linkedin.startsWith("http")?contact.linkedin:`https://${contact.linkedin}`}/>}
-          {contact.notes    &&<div style={{gridColumn:"1/-1"}}><InfoRow label="Notes" value={contact.notes}/></div>}
-        </div>
-      </div>
-      {!contact.cold&&(
-        <div style={{...S.card}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <p style={{...S.secH,margin:0}}>Manual Follow-ups</p>
-            <button onClick={()=>setShowFU(!showFU)} style={S.btnSm}>+ Schedule</button>
-          </div>
-          {showFU&&(
-            <div style={{background:D.surface,borderRadius:8,padding:14,marginBottom:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
-              <div><label style={S.lbl}>Date</label><input type="date" value={newFU.date} onChange={e=>setNewFU(f=>({...f,date:e.target.value}))} style={{...S.inp,width:"auto",colorScheme:"dark"}}/></div>
-              <div style={{flex:1,minWidth:150}}><label style={S.lbl}>Note (optional)</label><input placeholder="What to discuss…" value={newFU.note} onChange={e=>setNewFU(f=>({...f,note:e.target.value}))} style={S.inp}/></div>
-              <button onClick={()=>addFollowup(contact.id)} style={S.btn1}>Add</button>
-              <button onClick={()=>setShowFU(false)} style={S.btn2}>Cancel</button>
-            </div>
-          )}
-          {cFU.length===0
-            ?<p style={{fontSize:14,color:D.textMuted,margin:0}}>No manual follow-ups scheduled</p>
-            :<div style={{display:"flex",flexDirection:"column",gap:7}}>
-              {cFU.map(fu=>{
-                const u=!fu.done?getDateUrgency(fu.date):null;
-                return(
-                  <div key={fu.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,background:isOverdue(fu.date)&&!fu.done?"#120800":D.surface,border:`1px solid ${isOverdue(fu.date)&&!fu.done?"#4A2E00":D.border}`}}>
-                    <input type="checkbox" checked={fu.done} onChange={()=>setFollowups(fs=>fs.map(f=>f.id===fu.id?{...f,done:!f.done}:f))} style={{width:15,height:15,cursor:"pointer",accentColor:D.accent}}/>
-                    <div style={{flex:1}}>
-                      <span style={{fontSize:13,fontWeight:600,color:fu.done?D.textMuted:isOverdue(fu.date)?"#FCD34D":D.text,textDecoration:fu.done?"line-through":"none"}}>{isToday(fu.date)?"Today":formatDate(fu.date)}</span>
-                      {fu.note&&<p style={{margin:"2px 0 0",fontSize:13,color:fu.done?D.textMuted:D.textSub}}>{fu.note}</p>}
-                    </div>
-                    {!fu.done&&u&&<RawUrgencyBadge u={u}/>}
-                    <button onClick={()=>setFollowups(fs=>fs.filter(f=>f.id!==fu.id))} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:18,padding:0,lineHeight:1}}>×</button>
-                  </div>
-                );
-              })}
-            </div>
-          }
-        </div>
-      )}
-      <div style={{...S.card}}>
-        <p style={S.secH}>Conversation Log</p>
-        <div style={{display:"flex",gap:8,marginBottom:14}}>
-          <textarea ref={logRef} value={newLog} onChange={e=>setNewLog(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();addLog(contact.id);}}}
-            placeholder="Log a note or conversation… (Enter to save)"
-            style={{flex:1,padding:"10px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",resize:"none",height:70,outline:"none",background:D.surface,color:D.text}}/>
-          <button onClick={()=>addLog(contact.id)} style={{...S.btn1,alignSelf:"flex-end"}}>Save</button>
-        </div>
-        {(!contact.conversations||!contact.conversations.length)
-          ?<p style={{fontSize:14,color:D.textMuted,margin:0}}>No conversations logged yet</p>
-          :<div>
-            {contact.conversations.map((cv,i)=>(
-              <div key={cv.id} style={{display:"flex",gap:12,paddingBottom:13,marginBottom:i<contact.conversations.length-1?13:0,borderBottom:i<contact.conversations.length-1?`1px solid ${D.border}`:"none"}}>
-                <div style={{width:2,background:D.borderHi,borderRadius:2,flexShrink:0,marginTop:4}}/>
-                <div style={{flex:1}}>
-                  <p style={{margin:"0 0 4px",fontSize:14,color:D.text,lineHeight:1.6}}>{cv.text}</p>
-                  <span style={{fontSize:12,color:D.textMuted}}>{new Date(cv.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"})}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        }
-      </div>
-    </div>
-  );
-}
-
 // ── ERROR BOUNDARIES ──────────────────────────────────────────────────────────
 class ErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={error:null};}
   static getDerivedStateFromError(e){return{error:e};}
   render(){
-    if(this.state.error)return(
+    if(this.state.error) return(
       <div style={{padding:30,color:"#F87171"}}>
         <p style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong.</p>
         <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8}}>{this.state.error?.message}</pre>
@@ -1212,13 +1105,11 @@ class ErrorBoundary extends React.Component{
     return this.props.children;
   }
 }
-function SafeDetailView(props){return<ErrorBoundary onBack={()=>props.setView("contacts")}><DetailView {...props}/></ErrorBoundary>;}
-
 class RootErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={error:null};}
   static getDerivedStateFromError(e){return{error:e};}
   render(){
-    if(this.state.error)return(
+    if(this.state.error) return(
       <div style={{minHeight:"100vh",background:"#080C14",display:"flex",alignItems:"center",justifyContent:"center",padding:30,fontFamily:"'DM Sans',sans-serif"}}>
         <div style={{maxWidth:540,width:"100%"}}>
           <p style={{color:"#F87171",fontWeight:700,fontSize:18,marginBottom:10}}>BridgeFlow ran into a problem</p>
@@ -1352,6 +1243,7 @@ function App(){
   });
   const stageCounts=STAGES.reduce((a,s)=>({...a,[s]:activeContacts.filter(c=>c.stage===s).length}),{});
   const switchTab=t=>{setTab(t);setView(t);};
+  const addContactAction=()=>{setForm(emptyContact);setEditMode(false);setView("add");};
 
   const SyncDot=()=>{
     const color=syncState==="err"?D.red:syncState==="ok"?D.green:syncState==="syncing"?D.yellow:D.textMuted;
@@ -1379,8 +1271,8 @@ function App(){
       </div>
 
       <div style={{maxWidth:view==="calendar"?"100%":740,margin:"0 auto",padding:"30px 20px"}}>
-        {view==="home"     &&<HomeView contacts={contacts} followups={followups} switchTab={switchTab} setFilterStage={setFilterStage} onAddContact={()=>{setForm(emptyContact);setEditMode(false);setView("add");}}/>}
-        {view==="contacts"&&(
+        {view==="home"     &&<HomeView contacts={contacts} followups={followups} switchTab={switchTab} setFilterStage={setFilterStage} onAddContact={addContactAction}/>}
+        {view==="contacts" &&(
           <div>
             <BackHome switchTab={switchTab}/>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
@@ -1388,19 +1280,14 @@ function App(){
                 <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Contacts</h1>
                 <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{activeContacts.length} active · {coldContacts.length} cold</p>
               </div>
-              <button onClick={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} style={S.btn1}>+ Add Contact</button>
+              <button onClick={addContactAction} style={S.btn1}>+ Add Contact</button>
             </div>
             <div style={{display:"flex",gap:10,marginBottom:18}}>
               <input placeholder="Search contacts…" value={search} onChange={e=>setSearch(e.target.value)}
                 style={{flex:1,padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text}}/>
               {filterStage!=="All"&&<button onClick={()=>setFilterStage("All")} style={{...S.btnSm,color:D.textMuted}}>Clear ×</button>}
             </div>
-            {filterStage!=="All"&&(
-              <div style={{marginBottom:14,display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:12,color:D.textSub}}>Filtered by:</span>
-                <StageBadge stage={filterStage}/>
-              </div>
-            )}
+            {filterStage!=="All"&&<div style={{marginBottom:14,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:12,color:D.textSub}}>Filtered by:</span><StageBadge stage={filterStage}/></div>}
             {filtered.length===0?(
               <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
                 <div style={{fontSize:40,marginBottom:10}}>👥</div>
@@ -1428,7 +1315,7 @@ function App(){
             )}
           </div>
         )}
-        {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView} onAddContact={()=>{setForm(emptyContact);setEditMode(false);setView("add");}} switchTab={switchTab}/>}
+        {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView} onAddContact={addContactAction} switchTab={switchTab}/>}
         {view==="cold"     &&<ColdView  contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
         {view==="calendar" &&<CalendarView contacts={contacts} switchTab={switchTab} calLinks={calLinks} setCalLinks={setCalLinks}/>}
         {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive} switchTab={switchTab} calLinks={calLinks}/>}
