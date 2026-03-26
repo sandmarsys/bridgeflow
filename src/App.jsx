@@ -704,7 +704,15 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
               <span style={{fontWeight:700,fontSize:14,color:D.text}}>{ev.summary||"(No title)"}</span>
             </div>
             <div style={{fontSize:12,color:D.textSub}}>{fmtTime(ev.start?.dateTime)} – {fmtTime(ev.end?.dateTime)}</div>
-            {ev.location&&<div style={{fontSize:12,color:D.textMuted,marginTop:3}}>📍 {ev.location.length>40?ev.location.substring(0,40)+"…":ev.location}</div>}
+            {ev.location&&(
+              <div style={{fontSize:12,color:D.textMuted,marginTop:3}}>
+                📍 {ev.location.startsWith("http")
+                  ?<a href={ev.location} target="_blank" rel="noreferrer" style={{color:D.accent,textDecoration:"none"}}>
+                      {ev.location.includes("zoom")?"Join Zoom Meeting":ev.location.includes("meet.google")?"Join Google Meet":"Join Meeting"}
+                    </a>
+                  :ev.location.length>40?ev.location.substring(0,40)+"…":ev.location}
+              </div>
+            )}
             {ev.numAttendees>0&&<div style={{fontSize:12,color:D.textMuted,marginTop:2}}>👥 {ev.numAttendees} attendees</div>}
           </div>
           <button onClick={()=>{setSelectedEv(null);setShowLink(false);}} style={{background:"none",border:"none",color:D.textMuted,cursor:"pointer",fontSize:20,lineHeight:1,padding:0}}>×</button>
