@@ -564,8 +564,18 @@ function SafeDetailView(props){
 
 // ── CALENDAR VIEW ─────────────────────────────────────────────────────────────
 const HOURS=Array.from({length:24},(_,i)=>i);
+// Calendar colors matching Google Calendar
+const CAL_COLOR_MAP = {
+  "e.sand@marketingeddie.com": "#42d692",
+  "c_adc72d1f80e984699226f5ab5d9626b90bf208a1d99fdfb765bd9e7592ec1338@group.calendar.google.com": "#cd74e6",
+  "c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com": "#9fc6e7",
+};
 const CAL_COLORS=["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#EF4444","#6366F1"];
-function calColor(str){let h=0;for(let i=0;i<str.length;i++)h=str.charCodeAt(i)+((h<<5)-h);return CAL_COLORS[Math.abs(h)%CAL_COLORS.length];}
+function calColor(str,calendarId){
+  if(calendarId&&CAL_COLOR_MAP[calendarId]) return CAL_COLOR_MAP[calendarId];
+  let h=0;for(let i=0;i<str.length;i++)h=str.charCodeAt(i)+((h<<5)-h);
+  return CAL_COLORS[Math.abs(h)%CAL_COLORS.length];
+}
 
 function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
   const todayDate=new Date();todayDate.setHours(0,0,0,0);
@@ -633,11 +643,13 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
       return new Date(raw).toLocaleDateString("en-CA",{timeZone:"America/New_York"})===ds;
     });
   };
-  const evStyle=ev=>{
+  const evStyle=(ev, index, total)=>{
     const s=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
     const e=new Date(new Date(ev.end?.dateTime||ev.end?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
     const sm=s.getHours()*60+s.getMinutes();const em=e.getHours()*60+e.getMinutes();
-    return{top:(sm/60)*56,height:Math.max(((em-sm)/60)*56,22),color:calColor(ev.summary||"event")};
+    const width=total>1?`${Math.floor(98/total)}%`:"calc(100% - 4px)";
+    const left=total>1?`${Math.floor(index*(98/total))+1}%`:"2px";
+    return{top:(sm/60)*56,height:Math.max(((em-sm)/60)*56,22),color:calColor(ev.summary||"event",ev.calendarId),width,left,right:"auto"};
   };
   const fmtHour=h=>{const p=h<12?"AM":"PM";const hr=h===0?12:h>12?h-12:h;return`${hr} ${p}`;};
   const fmtTime=dt=>{if(!dt)return"";return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});};
@@ -676,7 +688,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
           {!loading&&events.length===0&&<p style={{fontSize:12,color:D.textMuted,margin:0}}>No events</p>}
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
             {events.slice(0,8).map(ev=>{
-              const color=calColor(ev.summary||"event");
+              const color=calColor(ev.summary||"event",ev.calendarId);
               return(
                 <div key={ev.id||ev.summary} onClick={()=>setSelectedEv(ev)} style={{display:"flex",gap:7,alignItems:"flex-start",cursor:"pointer",padding:"3px 0"}}>
                   <div style={{width:3,borderRadius:2,background:color,flexShrink:0,marginTop:3,height:30}}/>
@@ -699,7 +711,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     const evKey=makeEvKey(ev);
     const linkedId=calLinks[evKey];
     const linked=linkedId?contacts.find(c=>c.id===linkedId):null;
-    const color=calColor(ev.summary||"event");
+    const color=calColor(ev.summary||"event",ev.calendarId);
     return(
       <div style={{position:"fixed",bottom:24,right:24,width:300,background:D.card,border:`1.5px solid ${color}55`,borderRadius:14,padding:18,zIndex:50,boxShadow:"0 8px 32px rgba(0,0,0,0.5)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
@@ -851,23 +863,26 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                       <div key={di}
                         style={{height:56,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}}
                         onDoubleClick={()=>openNew(ds,String(h).padStart(2,"0")+":00")}>
-                        {eventsForDay(d).filter(ev=>{
-                          const dt=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
-                          return dt.getHours()===h;
-                        }).map((ev,ei)=>{
-                          const{top,height,color}=evStyle(ev);
-                          const evKey=makeEvKey(ev);
-                          const linked=calLinks[evKey]?contacts.find(c=>c.id===calLinks[evKey]):null;
-                          return(
-                            <div key={ei}
-                              onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
-                              style={{position:"absolute",left:2,right:2,top:top-(h*56),height,background:color+"33",border:`1.5px solid ${color}`,borderRadius:5,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"2px 5px"}}>
-                              <div style={{fontSize:10,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
-                              {height>30&&<div style={{fontSize:9,color:color+"cc"}}>{fmtTime(ev.start?.dateTime)}</div>}
-                              {linked&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>🔗 {linked.name}</div>}
-                            </div>
-                          );
-                        })}
+                        {(()=>{
+                          const dayEvs=eventsForDay(d).filter(ev=>{
+                            const dt=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
+                            return dt.getHours()===h;
+                          });
+                          return dayEvs.map((ev,ei)=>{
+                            const{top,height,color,width,left}=evStyle(ev,ei,dayEvs.length);
+                            const evKey=makeEvKey(ev);
+                            const linked=calLinks[evKey]?contacts.find(c=>c.id===calLinks[evKey]):null;
+                            return(
+                              <div key={ei}
+                                onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
+                                style={{position:"absolute",left,width,top:top-(h*56),height,background:color+"33",border:`1.5px solid ${color}`,borderRadius:5,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"2px 5px",boxSizing:"border-box"}}>
+                                <div style={{fontSize:10,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
+                                {height>30&&<div style={{fontSize:9,color:color+"cc"}}>{fmtTime(ev.start?.dateTime)}</div>}
+                                {linked&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>🔗 {linked.name}</div>}
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     );
                   })}
@@ -977,7 +992,7 @@ function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
         {!loadingEvs&&upcomingEvs.length>0&&(
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {upcomingEvs.map((ev,i)=>{
-              const color=calColor(ev.summary||"event");
+              const color=calColor(ev.summary||"event",ev.calendarId);
               return(
                 <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:D.surface,border:`1px solid ${D.border}`}}>
                   <div style={{width:3,height:36,borderRadius:2,background:color,flexShrink:0}}/>
