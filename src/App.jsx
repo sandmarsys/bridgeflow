@@ -561,7 +561,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
   const EventPopup=()=>{
     if(!selectedEv) return null;
     const ev=selectedEv;
-    const linkedId=calLinks[ev.id];
+    const linkedId=calLinks[ev.id.split("@")[0]]||calLinks[ev.id];
     const linked=linkedId?contacts.find(c=>c.id===linkedId):null;
     const color=calColor(ev.summary||"event");
     return(
@@ -582,7 +582,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,background:"#0D1828",border:`1px solid ${D.border}`,marginBottom:10}}>
             <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>{linked.name.charAt(0).toUpperCase()}</div>
             <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{linked.name}</span>
-            <button onClick={()=>setCalLinks(p=>{const n={...p};delete n[ev.id];return n;})} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
+            <button onClick={()=>setCalLinks(p=>{const n={...p};delete n[ev.id.split("@")[0]];delete n[ev.id];return n;})} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
           </div>
         ):(
           <button onClick={()=>setShowLink(v=>!v)} style={{...S.btnSm,fontSize:12,color:D.accent,borderColor:D.accent+"66",width:"100%",marginBottom:10}}>🔗 Link to Contact</button>
@@ -726,7 +726,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                       >
                         {eventsForDay(d).filter(ev=>new Date(ev.start?.dateTime||ev.start?.date).getHours()===h).map(ev=>{
                           const{top,height,color}=evStyle(ev);
-                          const linked=calLinks[ev.id]?contacts.find(c=>c.id===calLinks[ev.id]):null;
+                          const linked=calLinks[ev.id.split("@")[0]]||calLinks[ev.id]?contacts.find(c=>c.id===(calLinks[ev.id.split("@")[0]]||calLinks[ev.id])):null;
                           return(
                             <div key={ev.id}
                               onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
