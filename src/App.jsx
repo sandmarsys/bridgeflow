@@ -100,7 +100,12 @@ function makeEvKey(ev) {
 }
 
 const emptyContact={name:"",company:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:""};
-const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:""});
+const CALENDARS = [
+  { id:"e.sand@marketingeddie.com", name:"Meeting", color:"#42d692" },
+  { id:"c_adc72d1f80e984699226f5ab5d9626b90bf208a1d99fdfb765bd9e7592ec1338@group.calendar.google.com", name:"General", color:"#cd74e6" },
+  { id:"c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com", name:"FitPro", color:"#9fc6e7" },
+];
+const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:"",calendarId:"e.sand@marketingeddie.com"});
 
 function normalizeContact(c) {
   const str=v=>(v===null||v===undefined)?"":String(v);
@@ -603,7 +608,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     setSaving(true);setEvErr("");
     try{
       const inviteesArr=local.invitees?local.invitees.split(",").map(s=>s.trim()).filter(Boolean):[];
-      const res=await fetch(APPS_SCRIPT_URL,{method:"POST",body:JSON.stringify({action:"createEvent",event:{title:local.title,date:local.date,startTime:local.startTime,endTime:local.endTime||"",invitees:inviteesArr,location:local.link||"",description:""}})});
+      const res=await fetch(APPS_SCRIPT_URL,{method:"POST",body:JSON.stringify({action:"createEvent",event:{title:local.title,date:local.date,startTime:local.startTime,endTime:local.endTime||"",invitees:inviteesArr,location:local.link||"",description:"",calendarId:local.calendarId||"e.sand@marketingeddie.com"}})});
       const json=await res.json();
       if(!json.ok) throw new Error(json.error||"Failed");
       setShowNew(false);setNewEv(emptyNewEv());
@@ -762,6 +767,21 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div><label style={S.lbl}>Title *</label><input value={local.title} onChange={upd("title")} placeholder="Meeting title" style={S.inp} autoFocus/></div>
+            <div>
+              <label style={S.lbl}>Calendar</label>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {CALENDARS.map(cal=>{
+                  const sel=local.calendarId===cal.id;
+                  return(
+                    <button key={cal.id} onClick={()=>setLocal(p=>({...p,calendarId:cal.id}))}
+                      style={{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${sel?cal.color:D.border}`,background:sel?cal.color+"33":"transparent",color:sel?cal.color:D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:sel?600:400,display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{width:8,height:8,borderRadius:"50%",background:cal.color,display:"inline-block",flexShrink:0}}/>
+                      {cal.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div><label style={S.lbl}>Date *</label><input type="date" value={local.date} onChange={upd("date")} style={{...S.inp,colorScheme:"dark"}}/></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div><label style={S.lbl}>Start Time *</label><input type="time" value={local.startTime} onChange={upd("startTime")} style={{...S.inp,colorScheme:"dark"}}/></div>
