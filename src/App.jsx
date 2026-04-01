@@ -564,7 +564,7 @@ function SafeDetailView(props){
 
 // ── CALENDAR VIEW ─────────────────────────────────────────────────────────────
 const HOURS=Array.from({length:24},(_,i)=>i);
-const HOUR_HEIGHT=80; // increased from 56 — gives 30min events 40px, 1hr events 80px
+const HOUR_HEIGHT=120; // 30min = 60px, 1hr = 120px — enough room for all 4 lines
 // Calendar colors matching Google Calendar
 const CAL_COLOR_MAP = {
   "e.sand@marketingeddie.com": "#42d692",
@@ -650,7 +650,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     const sm=s.getHours()*60+s.getMinutes();const em=e.getHours()*60+e.getMinutes();
     const width=total>1?`${Math.floor(98/total)}%`:"calc(100% - 4px)";
     const left=total>1?`${Math.floor(index*(98/total))+1}%`:"2px";
-    return{top:(sm/60)*HOUR_HEIGHT,height:Math.max(((em-sm)/60)*HOUR_HEIGHT,36),color:calColor(ev.summary||"event",ev.calendarId),width,left,right:"auto"};
+    return{top:(sm/60)*HOUR_HEIGHT,height:Math.max(((em-sm)/60)*HOUR_HEIGHT,56),color:calColor(ev.summary||"event",ev.calendarId),width,left,right:"auto"};
   };
   const fmtHour=h=>{const p=h<12?"AM":"PM";const hr=h===0?12:h>12?h-12:h;return`${hr} ${p}`;};
   const fmtTime=dt=>{if(!dt)return"";return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});};
