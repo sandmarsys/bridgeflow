@@ -564,6 +564,7 @@ function SafeDetailView(props){
 
 // ── CALENDAR VIEW ─────────────────────────────────────────────────────────────
 const HOURS=Array.from({length:24},(_,i)=>i);
+const HOUR_HEIGHT=80; // increased from 56 — gives 30min events 40px, 1hr events 80px
 // Calendar colors matching Google Calendar
 const CAL_COLOR_MAP = {
   "e.sand@marketingeddie.com": "#42d692",
@@ -594,7 +595,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
   const[showLink,   setShowLink]  =useState(false);
   const gridRef=useRef(null);
 
-  useEffect(()=>{if(gridRef.current)gridRef.current.scrollTop=8*56;},[]);
+  useEffect(()=>{if(gridRef.current)gridRef.current.scrollTop=8*HOUR_HEIGHT;},[]);
 
   const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d;});
 
@@ -649,7 +650,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     const sm=s.getHours()*60+s.getMinutes();const em=e.getHours()*60+e.getMinutes();
     const width=total>1?`${Math.floor(98/total)}%`:"calc(100% - 4px)";
     const left=total>1?`${Math.floor(index*(98/total))+1}%`:"2px";
-    return{top:(sm/60)*56,height:Math.max(((em-sm)/60)*56,22),color:calColor(ev.summary||"event",ev.calendarId),width,left,right:"auto"};
+    return{top:(sm/60)*HOUR_HEIGHT,height:Math.max(((em-sm)/60)*HOUR_HEIGHT,36),color:calColor(ev.summary||"event",ev.calendarId),width,left,right:"auto"};
   };
   const fmtHour=h=>{const p=h<12?"AM":"PM";const hr=h===0?12:h>12?h-12:h;return`${hr} ${p}`;};
   const fmtTime=dt=>{if(!dt)return"";return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});};
@@ -897,13 +898,13 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
             <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)"}}>
               {HOURS.map(h=>(
                 <React.Fragment key={h}>
-                  <div style={{height:56,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:8,paddingTop:2,fontSize:10,color:D.textMuted,flexShrink:0}}>{h>0?fmtHour(h):""}</div>
+                  <div style={{height:HOUR_HEIGHT,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:8,paddingTop:2,fontSize:10,color:D.textMuted,flexShrink:0}}>{h>0?fmtHour(h):""}</div>
                   {weekDays.map((d,di)=>{
                     const isTd=d.getTime()===todayDate.getTime();
                     const ds=d.toISOString().split("T")[0];
                     return(
                       <div key={di}
-                        style={{height:56,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}}
+                        style={{height:HOUR_HEIGHT,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}}
                         onDoubleClick={()=>openNew(ds,String(h).padStart(2,"0")+":00")}>
                         {(()=>{
                           const dayEvs=eventsForDay(d).filter(ev=>{
