@@ -714,37 +714,71 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     const color=calColor(ev.summary||"event",ev.calendarId);
     return(
       <div style={{position:"fixed",bottom:24,right:24,width:300,background:D.card,border:`1.5px solid ${color}55`,borderRadius:14,padding:18,zIndex:50,boxShadow:"0 8px 32px rgba(0,0,0,0.5)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
           <div style={{flex:1,paddingRight:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-              <div style={{width:10,height:10,borderRadius:"50%",background:color,flexShrink:0}}/>
-              <span style={{fontWeight:700,fontSize:14,color:D.text}}>{ev.summary||"(No title)"}</span>
-            </div>
-            <div style={{fontSize:12,color:D.textSub}}>{fmtTime(ev.start?.dateTime)} – {fmtTime(ev.end?.dateTime)}</div>
-            {ev.location&&(
-              <div style={{fontSize:12,color:D.textMuted,marginTop:3}}>
-                📍 {ev.location.startsWith("http")
-                  ?<a href={ev.location} target="_blank" rel="noreferrer" style={{color:D.accent,textDecoration:"none"}}>
-                      {ev.location.includes("zoom")?"Join Zoom Meeting":ev.location.includes("meet.google")?"Join Google Meet":"Join Meeting"}
-                    </a>
-                  :ev.location.length>40?ev.location.substring(0,40)+"…":ev.location}
+            {/* Calendar name badge */}
+            {ev.calendarName&&(
+              <div style={{display:"inline-flex",alignItems:"center",gap:4,marginBottom:6,padding:"2px 8px",borderRadius:20,background:color+"22",border:`1px solid ${color}44`}}>
+                <span style={{width:7,height:7,borderRadius:"50%",background:color,display:"inline-block"}}/>
+                <span style={{fontSize:10,fontWeight:600,color}}>{ev.calendarName}</span>
               </div>
             )}
-            {ev.numAttendees>0&&<div style={{fontSize:12,color:D.textMuted,marginTop:2}}>👥 {ev.numAttendees} attendees</div>}
+            {/* Title */}
+            <div style={{fontSize:15,fontWeight:700,color:D.text,marginBottom:8,lineHeight:1.4}}>{ev.summary||"(No title)"}</div>
+            {/* Time */}
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+              <span style={{fontSize:13,color:D.textSub}}>🕐</span>
+              <span style={{fontSize:13,color:D.text,fontWeight:500}}>
+                {fmtTime(ev.start?.dateTime)}
+                {ev.end?.dateTime&&<span style={{color:D.textSub}}> – {fmtTime(ev.end.dateTime)}</span>}
+              </span>
+              {(()=>{
+                if(!ev.start?.dateTime||!ev.end?.dateTime) return null;
+                const mins=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000);
+                const h=Math.floor(mins/60);const m=mins%60;
+                const dur=h>0?(m>0?`${h}h ${m}m`:`${h}h`):`${m}m`;
+                return<span style={{fontSize:11,color:D.textMuted,background:D.surface,padding:"1px 7px",borderRadius:20,border:`1px solid ${D.border}`}}>{dur}</span>;
+              })()}
+            </div>
+            {/* Location / Meeting link */}
+            {ev.location&&(
+              <div style={{display:"flex",alignItems:"flex-start",gap:6,marginBottom:6}}>
+                <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
+                {ev.location.startsWith("http")
+                  ?<a href={ev.location} target="_blank" rel="noreferrer"
+                      style={{fontSize:13,color:D.accent,textDecoration:"none",fontWeight:500,wordBreak:"break-all"}}>
+                      {ev.location.includes("zoom")?"Join Zoom Meeting":ev.location.includes("meet.google")?"Join Google Meet":"Join Meeting"}
+                    </a>
+                  :<span style={{fontSize:13,color:D.textSub}}>{ev.location}</span>
+                }
+              </div>
+            )}
+            {/* Attendees */}
+            {ev.numAttendees>0&&(
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <span style={{fontSize:13,color:D.textSub}}>👥</span>
+                <span style={{fontSize:13,color:D.textSub}}>{ev.numAttendees} attendee{ev.numAttendees>1?"s":""}</span>
+              </div>
+            )}
           </div>
-          <button onClick={()=>{setSelectedEv(null);setShowLink(false);}} style={{background:"none",border:"none",color:D.textMuted,cursor:"pointer",fontSize:20,lineHeight:1,padding:0}}>×</button>
+          <button onClick={()=>{setSelectedEv(null);setShowLink(false);}} style={{background:"none",border:"none",color:D.textMuted,cursor:"pointer",fontSize:20,lineHeight:1,padding:0,flexShrink:0}}>×</button>
         </div>
+        {/* Linked contact */}
         {linked?(
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,background:"#0D1828",border:`1px solid ${D.border}`,marginBottom:10}}>
-            <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>{linked.name.charAt(0).toUpperCase()}</div>
-            <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{linked.name}</span>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,background:"#0D1828",border:`1px solid ${D.accent}44`,marginBottom:10}}>
+            <div style={{width:24,height:24,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff",flexShrink:0}}>{linked.name.charAt(0).toUpperCase()}</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,fontWeight:600,color:D.text}}>{linked.name}</div>
+              <div style={{fontSize:10,color:D.textMuted}}><StageBadge stage={linked.stage}/></div>
+            </div>
             <button onClick={()=>setCalLinks(p=>{const n={...p};delete n[evKey];return n;})} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
           </div>
         ):(
           <button onClick={()=>setShowLink(v=>!v)} style={{...S.btnSm,fontSize:12,color:D.accent,borderColor:D.accent+"66",width:"100%",marginBottom:10}}>🔗 Link to Contact</button>
         )}
+        {/* Contact search */}
         {showLink&&(
-          <div style={{background:D.surface,borderRadius:8,border:`1px solid ${D.border}`,overflow:"hidden",marginBottom:8}}>
+          <div style={{background:D.surface,borderRadius:8,border:`1px solid ${D.border}`,overflow:"hidden",marginBottom:10}}>
             <input autoFocus value={linkSearch} onChange={e=>setLinkSearch(e.target.value)} placeholder="Search contacts…"
               style={{...S.inp,padding:"6px 10px",fontSize:12,borderRadius:0,border:"none",borderBottom:`1px solid ${D.border}`}}/>
             <div style={{maxHeight:150,overflowY:"auto"}}>
@@ -754,13 +788,21 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                   onMouseEnter={e=>e.currentTarget.style.background="#1A2535"}
                   onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                   <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#fff",flexShrink:0}}>{c.name.charAt(0).toUpperCase()}</div>
-                  <span style={{fontSize:12,color:D.text}}>{c.name}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,color:D.text}}>{c.name}</div>
+                    {c.company&&<div style={{fontSize:11,color:D.textMuted}}>{c.company}</div>}
+                  </div>
+                  <StageBadge stage={c.stage}/>
                 </div>
               ))}
             </div>
           </div>
         )}
-        {ev.htmlLink&&<a href={ev.htmlLink} target="_blank" rel="noreferrer" style={{fontSize:12,color:D.accent,textDecoration:"none"}}>Open in Google Calendar ↗</a>}
+        {/* Footer */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:`1px solid ${D.border}`,paddingTop:10,marginTop:2}}>
+          <span style={{fontSize:11,color:D.textMuted}}>{ev.calendarName||"Calendar"}</span>
+          {ev.htmlLink&&<a href={ev.htmlLink} target="_blank" rel="noreferrer" style={{fontSize:12,color:D.accent,textDecoration:"none"}}>Open in Google Calendar ↗</a>}
+        </div>
       </div>
     );
   };
@@ -877,8 +919,9 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                                 onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
                                 style={{position:"absolute",left,width,top:top-(h*56),height,background:color+"33",border:`1.5px solid ${color}`,borderRadius:5,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"2px 5px",boxSizing:"border-box"}}>
                                 <div style={{fontSize:10,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
-                                {height>30&&<div style={{fontSize:9,color:color+"cc"}}>{fmtTime(ev.start?.dateTime)}</div>}
-                                {linked&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>🔗 {linked.name}</div>}
+                                {height>22&&<div style={{fontSize:9,color:color+"dd"}}>{fmtTime(ev.start?.dateTime)}{ev.end?.dateTime?` – ${fmtTime(ev.end.dateTime)}`:""}</div>}
+                                {height>44&&ev.location&&ev.location.startsWith("http")&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>🔗 {ev.location.includes("zoom")?"Zoom":ev.location.includes("meet.google")?"Meet":"Link"}</div>}
+                                {height>44&&linked&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>👤 {linked.name}</div>}
                               </div>
                             );
                           });
