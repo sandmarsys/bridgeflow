@@ -98,12 +98,18 @@ function makeEvKey(ev) {
   return`${(ev.summary||"").trim().toLowerCase()}::${dt.split("T")[0]}`;
 }
 
-// Get the meeting link to display for an event
+// ── FIX: Get the meeting link from the event ──────────────────────────────────
+// Priority: hangoutLink (direct meet.google.com URL) → location URL → Google Meet via htmlLink
 function getEventMeetingLink(ev) {
-  // Real URL in location (Zoom via Calendly)
-  if(ev.location&&ev.location.startsWith("http")) return{url:ev.location,label:ev.location.includes("zoom")?"Join Zoom Meeting":"Join Meeting",color:"#2196F3"};
-  // Google Meet — use the htmlLink from the event (opens Google Calendar event page with Join button)
-  if(ev.isGoogleMeet&&ev.meetHtmlLink) return{url:ev.meetHtmlLink,label:"Join Google Meet",color:"#4CAF50"};
+  // 1. Direct hangout link — this is the real meet.google.com/xxx-xxxx-xxx URL
+  if(ev.hangoutLink) return{url:ev.hangoutLink,label:"Join Google Meet",color:"#4CAF50"};
+  // 2. Location field with a URL (e.g. Zoom via Calendly)
+  if(ev.location&&ev.location.startsWith("http")){
+    const isZoom=ev.location.toLowerCase().includes("zoom");
+    return{url:ev.location,label:isZoom?"Join Zoom Meeting":"Join Meeting",color:"#2196F3"};
+  }
+  // 3. Fallback: event was flagged as Google Meet but no hangoutLink came through
+  if(ev.isGoogleMeet&&ev.meetHtmlLink) return{url:ev.meetHtmlLink,label:"Open in Google Calendar",color:"#4CAF50"};
   return null;
 }
 
@@ -720,7 +726,6 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     };
     return(
       <div style={{position:"fixed",bottom:24,right:24,width:300,background:D.card,border:`1.5px solid ${color}55`,borderRadius:14,padding:18,zIndex:50,boxShadow:"0 8px 32px rgba(0,0,0,0.5)"}}>
-        {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
           <div style={{flex:1,paddingRight:8}}>
             {ev.calendarName&&(
@@ -730,7 +735,6 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
               </div>
             )}
             <div style={{fontSize:15,fontWeight:700,color:D.text,marginBottom:8,lineHeight:1.4}}>{ev.summary||"(No title)"}</div>
-            {/* Time */}
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
               <span style={{fontSize:13,color:D.textSub}}>🕐</span>
               <span style={{fontSize:13,color:D.text,fontWeight:500}}>
@@ -739,10 +743,11 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
               </span>
               {getDur()&&<span style={{fontSize:11,color:D.textMuted,background:D.surface,padding:"1px 7px",borderRadius:20,border:`1px solid ${D.border}`}}>{getDur()}</span>}
             </div>
-            {/* Meeting link */}
             {ml&&(
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
+                <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>
+                  {ml.label.includes("Zoom")?"🎥":"📹"}
+                </span>
                 <a href={ml.url} target="_blank" rel="noreferrer"
                   style={{fontSize:13,fontWeight:600,textDecoration:"none",color:ml.color}}>
                   {ml.label}
@@ -758,7 +763,6 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
           </div>
           <button onClick={()=>{setSelectedEv(null);setShowLink(false);}} style={{background:"none",border:"none",color:D.textMuted,cursor:"pointer",fontSize:20,lineHeight:1,padding:0,flexShrink:0}}>×</button>
         </div>
-        {/* Linked contact */}
         {linked?(
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,background:"#0D1828",border:`1px solid ${D.accent}44`,marginBottom:10}}>
             <div style={{width:24,height:24,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff",flexShrink:0}}>{linked.name.charAt(0).toUpperCase()}</div>
