@@ -50,8 +50,7 @@ function daysBetween(dateStr) {
   return Math.round((new Date(dateStr+"T00:00:00")-new Date(new Date().toDateString()))/(1000*60*60*24));
 }
 function formatDate(d) {
-  if(!d) return"";
-  return new Date(d+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+  if(!d) return""; return new Date(d+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
 }
 function isOverdue(d){ return d?new Date(d+"T00:00:00")<new Date(new Date().toDateString()):false; }
 function isToday(d)  { return d?d===todayStr():false; }
@@ -93,18 +92,22 @@ function getDateUrgency(dateStr) {
   return       {level:"upcoming",   color:D.textSub, label:`Due in ${diff}d`,diff};
 }
 
-// Key for matching calendar events by title+date (avoids ID format issues)
+// Key for matching calendar events by title+date
 function makeEvKey(ev) {
   const dt=ev.start?.dateTime||ev.start?.date||"";
   return`${(ev.summary||"").trim().toLowerCase()}::${dt.split("T")[0]}`;
 }
 
+// Get the meeting link to display for an event
+function getEventMeetingLink(ev) {
+  // Real URL in location (Zoom via Calendly)
+  if(ev.location&&ev.location.startsWith("http")) return{url:ev.location,label:ev.location.includes("zoom")?"Join Zoom Meeting":"Join Meeting",color:"#2196F3"};
+  // Google Meet — use the htmlLink from the event (opens Google Calendar event page with Join button)
+  if(ev.isGoogleMeet&&ev.meetHtmlLink) return{url:ev.meetHtmlLink,label:"Join Google Meet",color:"#4CAF50"};
+  return null;
+}
+
 const emptyContact={name:"",company:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:""};
-const CALENDARS = [
-  { id:"e.sand@marketingeddie.com", name:"Meeting", color:"#42d692" },
-  { id:"c_adc72d1f80e984699226f5ab5d9626b90bf208a1d99fdfb765bd9e7592ec1338@group.calendar.google.com", name:"General", color:"#cd74e6" },
-  { id:"c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com", name:"FitPro", color:"#9fc6e7" },
-];
 const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:"",calendarId:"e.sand@marketingeddie.com"});
 
 function normalizeContact(c) {
@@ -163,8 +166,7 @@ async function pullFromScript(){
 // ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
 function BackHome({switchTab}){
   return(
-    <button onClick={()=>switchTab("home")}
-      style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>
+    <button onClick={()=>switchTab("home")} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",padding:"0 0 18px",fontSize:13,display:"flex",alignItems:"center",gap:5}}>
       ← Home
     </button>
   );
@@ -257,13 +259,12 @@ function SettingsModal({syncState,syncMsg,exportBackup,importBackup,onClose}){
             <span style={{width:10,height:10,borderRadius:"50%",background:syncState==="err"?D.red:D.green,flexShrink:0,display:"inline-block"}}/>
             <div>
               <p style={{margin:0,fontSize:14,color:D.text,fontWeight:500}}>{syncState==="err"?"Sync error":"Connected & syncing automatically"}</p>
-              <p style={{margin:"2px 0 0",fontSize:12,color:D.textSub}}>{syncState==="err"?syncMsg:"Every change saves to your Google Sheet within a few seconds"}</p>
+              <p style={{margin:"2px 0 0",fontSize:12,color:D.textSub}}>{syncState==="err"?syncMsg:"Every change saves to your Google Sheet"}</p>
             </div>
           </div>
         </div>
         <div style={{...S.card}}>
           <p style={S.secH}>📦 Manual Backup</p>
-          <p style={{margin:"0 0 14px",fontSize:13,color:D.textSub,lineHeight:1.6}}>Download all your data as a file for an extra safety net.</p>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
             <button onClick={exportBackup} style={S.btn1}>⬇ Export Backup</button>
             <label style={{...S.btn2,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6}}>
@@ -322,7 +323,7 @@ function CadenceTracker({contact,onComplete,onMoveToCold}){
       {allDone&&(
         <div style={{marginTop:14,padding:"14px 16px",borderRadius:10,background:"#0E1520",border:`1px solid ${D.coldBorder}`}}>
           <p style={{margin:"0 0 4px",fontSize:13,fontWeight:600,color:D.coldText}}>All follow-ups completed with no response</p>
-          <p style={{margin:"0 0 12px",fontSize:12,color:D.textMuted,lineHeight:1.6}}>Move this contact to the Cold list. You'll get a reminder to check in again in 3 months.</p>
+          <p style={{margin:"0 0 12px",fontSize:12,color:D.textMuted,lineHeight:1.6}}>Move this contact to the Cold list.</p>
           <button onClick={onMoveToCold} style={{background:"#141C28",border:`1px solid ${D.coldBorder}`,borderRadius:7,padding:"7px 14px",fontSize:13,color:D.coldText,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>❄️ Move to Cold List</button>
         </div>
       )}
@@ -346,7 +347,7 @@ function ColdStatusCard({contact,onRevive}){
         {isdue&&<span style={{marginLeft:"auto",fontSize:12,fontWeight:600,color:"#7AB8D4",background:"#0D1E2E",padding:"3px 10px",borderRadius:20,border:"1px solid #2A4A60"}}>🔵 Check-in due{diff===0?" today":`${Math.abs(diff)}d ago`}</span>}
       </div>
       <div style={{background:"#0D1520",borderRadius:8,padding:"12px 14px",marginBottom:14,fontSize:13,color:D.textMuted,lineHeight:1.7}}>
-        Ready to re-engage? Change the stage back to <strong style={{color:D.coldText}}>Connection</strong> to restart the full follow-up cadence.
+        Ready to re-engage? Revive to restart the full follow-up cadence.
       </div>
       <button onClick={onRevive} style={{background:D.accent,border:"none",borderRadius:7,padding:"8px 16px",fontSize:13,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>🔗 Revive — Move back to Connection</button>
     </div>
@@ -355,55 +356,52 @@ function ColdStatusCard({contact,onRevive}){
 
 // ── MEETING HISTORY ───────────────────────────────────────────────────────────
 function MeetingHistory({contactId,calLinks}){
-  const [meetings,setMeetings]=useState([]);
-  const [loading, setLoading] =useState(true);
-
-  // All keys linked to this contact
+  const[meetings,setMeetings]=useState([]);
+  const[loading, setLoading] =useState(true);
   const linkedKeys=Object.entries(calLinks||{}).filter(([,cId])=>cId===contactId).map(([k])=>k);
 
   useEffect(()=>{
-    if(!linkedKeys.length){ setLoading(false); return; }
+    if(!linkedKeys.length){setLoading(false);return;}
     const load=async()=>{
       setLoading(true);
       try{
-        const start=new Date(); start.setDate(start.getDate()-90);
-        const end  =new Date(); end.setDate(end.getDate()+30);
-        const fmt  =d=>d.toISOString().split(".")[0];
-        const res  =await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(start))+"&timeMax="+encodeURIComponent(fmt(end)));
-        const json =await res.json();
+        const start=new Date();start.setDate(start.getDate()-90);
+        const end=new Date();end.setDate(end.getDate()+30);
+        const fmt=d=>d.toISOString().split(".")[0];
+        const res=await fetch(APPS_SCRIPT_URL+"?action=getEvents&timeMin="+encodeURIComponent(fmt(start))+"&timeMax="+encodeURIComponent(fmt(end)));
+        const json=await res.json();
         if(json.ok&&Array.isArray(json.events)){
           const matched=json.events.filter(ev=>linkedKeys.includes(makeEvKey(ev)));
           matched.sort((a,b)=>new Date(b.start?.dateTime||b.start?.date)-new Date(a.start?.dateTime||a.start?.date));
           setMeetings(matched);
         }
-      }catch{ setMeetings([]); }
+      }catch{setMeetings([]);}
       setLoading(false);
     };
     load();
   },[contactId,JSON.stringify(linkedKeys)]);
 
   const fmtTime=ev=>{
-    const s=ev.start?.dateTime||ev.start?.date; if(!s) return"";
+    const s=ev.start?.dateTime||ev.start?.date;if(!s)return"";
     return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
   };
   const getDur=ev=>{
     const s=new Date(ev.start?.dateTime||ev.start?.date);
     const e=new Date(ev.end?.dateTime||ev.end?.date);
     const m=Math.round((e-s)/60000);
-    if(m<60) return`${m}m`;
-    const h=Math.floor(m/60);const mm=m%60;
-    return mm>0?`${h}h ${mm}m`:`${h}h`;
+    if(m<60)return`${m}m`;const h=Math.floor(m/60);const mm=m%60;return mm>0?`${h}h ${mm}m`:`${h}h`;
   };
   const isPast=ev=>new Date(ev.start?.dateTime||ev.start?.date)<new Date();
 
   if(loading) return<p style={{fontSize:13,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading meetings…</p>;
-  if(!linkedKeys.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>No linked meetings yet. Go to the Calendar tab, click an event and tap 🔗 Link to Contact.</p>;
-  if(!meetings.length)   return<p style={{fontSize:13,color:D.textMuted,margin:0}}>Linked meetings not found. Try re-linking from the Calendar tab.</p>;
+  if(!linkedKeys.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>No linked meetings yet. Go to Calendar tab and use 🔗 Link to Contact.</p>;
+  if(!meetings.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>Linked meetings not found. Try re-linking from the Calendar tab.</p>;
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {meetings.map((ev,i)=>{
         const past=isPast(ev);
+        const ml=getEventMeetingLink(ev);
         return(
           <div key={i} style={{display:"flex",gap:12,padding:"10px 14px",borderRadius:10,background:D.surface,border:`1px solid ${past?D.border:D.accent+"44"}`}}>
             <div style={{width:3,borderRadius:2,background:past?D.border:D.accent,flexShrink:0,alignSelf:"stretch"}}/>
@@ -415,9 +413,8 @@ function MeetingHistory({contactId,calLinks}){
                 </span>
               </div>
               <div style={{fontSize:12,color:D.textMuted}}>
-                📅 {fmtTime(ev)}
-                <span style={{marginLeft:10}}>⏱ {getDur(ev)}</span>
-                {ev.location&&<span style={{marginLeft:10}}>📍 {ev.location.length>40?ev.location.substring(0,40)+"…":ev.location}</span>}
+                📅 {fmtTime(ev)} · ⏱ {getDur(ev)}
+                {ml&&<span style={{marginLeft:8}}><a href={ml.url} target="_blank" rel="noreferrer" style={{color:ml.color,textDecoration:"none",fontWeight:600}}>{ml.label}</a></span>}
               </div>
             </div>
           </div>
@@ -482,7 +479,6 @@ function DetailView({selected,contacts,followups,setFollowups,setContacts,setVie
           {contact.notes    &&<div style={{gridColumn:"1/-1"}}><InfoRow label="Notes" value={contact.notes}/></div>}
         </div>
       </div>
-      {/* Meetings */}
       <div style={{...S.card}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
           <p style={{...S.secH,margin:0}}>Meetings</p>
@@ -490,7 +486,6 @@ function DetailView({selected,contacts,followups,setFollowups,setContacts,setVie
         </div>
         <MeetingHistory contactId={contact.id} calLinks={calLinks}/>
       </div>
-      {/* Manual follow-ups */}
       {!contact.cold&&(
         <div style={{...S.card}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -526,7 +521,6 @@ function DetailView({selected,contacts,followups,setFollowups,setContacts,setVie
           }
         </div>
       )}
-      {/* Conversation log */}
       <div style={{...S.card}}>
         <p style={S.secH}>Conversation Log</p>
         <div style={{display:"flex",gap:8,marginBottom:14}}>
@@ -564,16 +558,20 @@ function SafeDetailView(props){
 
 // ── CALENDAR VIEW ─────────────────────────────────────────────────────────────
 const HOURS=Array.from({length:24},(_,i)=>i);
-const HOUR_HEIGHT=120; // 30min = 60px, 1hr = 120px — enough room for all 4 lines
-// Calendar colors matching Google Calendar
-const CAL_COLOR_MAP = {
-  "e.sand@marketingeddie.com": "#42d692",
-  "c_adc72d1f80e984699226f5ab5d9626b90bf208a1d99fdfb765bd9e7592ec1338@group.calendar.google.com": "#cd74e6",
-  "c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com": "#9fc6e7",
+const HOUR_HEIGHT=120;
+const CAL_COLOR_MAP={
+  "e.sand@marketingeddie.com":"#42d692",
+  "c_adc72d1f80e984699226f5ab5d9626b90bf208a1d99fdfb765bd9e7592ec1338@group.calendar.google.com":"#cd74e6",
+  "c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com":"#9fc6e7",
 };
 const CAL_COLORS=["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#EF4444","#6366F1"];
-function calColor(str,calendarId){
-  if(calendarId&&CAL_COLOR_MAP[calendarId]) return CAL_COLOR_MAP[calendarId];
+const CALENDARS=[
+  {id:"e.sand@marketingeddie.com",         name:"Meeting", color:"#42d692"},
+  {id:"c_adc72d1f80e984699226f5ab5d9626b90bf208a1d99fdfb765bd9e7592ec1338@group.calendar.google.com",name:"General",color:"#cd74e6"},
+  {id:"c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com",name:"FitPro", color:"#9fc6e7"},
+];
+function calColor(str,calId){
+  if(calId&&CAL_COLOR_MAP[calId]) return CAL_COLOR_MAP[calId];
   let h=0;for(let i=0;i<str.length;i++)h=str.charCodeAt(i)+((h<<5)-h);
   return CAL_COLORS[Math.abs(h)%CAL_COLORS.length];
 }
@@ -619,7 +617,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     setSaving(true);setEvErr("");
     try{
       const inviteesArr=local.invitees?local.invitees.split(",").map(s=>s.trim()).filter(Boolean):[];
-      const res=await fetch(APPS_SCRIPT_URL,{method:"POST",body:JSON.stringify({action:"createEvent",event:{title:local.title,date:local.date,startTime:local.startTime,endTime:local.endTime||"",invitees:inviteesArr,location:local.link||"",description:"",calendarId:local.calendarId||"e.sand@marketingeddie.com"}})});
+      const res=await fetch(APPS_SCRIPT_URL,{method:"POST",body:JSON.stringify({action:"createEvent",event:{title:local.title,date:local.date,startTime:local.startTime,endTime:local.endTime||"",invitees:inviteesArr,location:local.link||"",description:"",calendarId:local.calendarId}})});
       const json=await res.json();
       if(!json.ok) throw new Error(json.error||"Failed");
       setShowNew(false);setNewEv(emptyNewEv());
@@ -644,13 +642,13 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
       return new Date(raw).toLocaleDateString("en-CA",{timeZone:"America/New_York"})===ds;
     });
   };
-  const evStyle=(ev, index, total)=>{
+  const evStyle=(ev,index,total)=>{
     const s=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
     const e=new Date(new Date(ev.end?.dateTime||ev.end?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
     const sm=s.getHours()*60+s.getMinutes();const em=e.getHours()*60+e.getMinutes();
     const width=total>1?`${Math.floor(98/total)}%`:"calc(100% - 4px)";
     const left=total>1?`${Math.floor(index*(98/total))+1}%`:"2px";
-    return{top:(sm/60)*HOUR_HEIGHT,height:Math.max(((em-sm)/60)*HOUR_HEIGHT,56),color:calColor(ev.summary||"event",ev.calendarId),width,left,right:"auto"};
+    return{top:(sm/60)*HOUR_HEIGHT,height:Math.max(((em-sm)/60)*HOUR_HEIGHT,56),color:calColor(ev.summary||"event",ev.calendarId),width,left};
   };
   const fmtHour=h=>{const p=h<12?"AM":"PM";const hr=h===0?12:h>12?h-12:h;return`${hr} ${p}`;};
   const fmtTime=dt=>{if(!dt)return"";return new Date(dt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});};
@@ -688,10 +686,10 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
           {loading&&<p style={{fontSize:12,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading…</p>}
           {!loading&&events.length===0&&<p style={{fontSize:12,color:D.textMuted,margin:0}}>No events</p>}
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
-            {events.slice(0,8).map(ev=>{
+            {events.slice(0,8).map((ev,i)=>{
               const color=calColor(ev.summary||"event",ev.calendarId);
               return(
-                <div key={ev.id||ev.summary} onClick={()=>setSelectedEv(ev)} style={{display:"flex",gap:7,alignItems:"flex-start",cursor:"pointer",padding:"3px 0"}}>
+                <div key={i} onClick={()=>setSelectedEv(ev)} style={{display:"flex",gap:7,alignItems:"flex-start",cursor:"pointer",padding:"3px 0"}}>
                   <div style={{width:3,borderRadius:2,background:color,flexShrink:0,marginTop:3,height:30}}/>
                   <div style={{minWidth:0}}>
                     <div style={{fontSize:11,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{ev.summary||"(No title)"}</div>
@@ -713,18 +711,24 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     const linkedId=calLinks[evKey];
     const linked=linkedId?contacts.find(c=>c.id===linkedId):null;
     const color=calColor(ev.summary||"event",ev.calendarId);
+    const ml=getEventMeetingLink(ev);
+    const getDur=()=>{
+      if(!ev.start?.dateTime||!ev.end?.dateTime) return null;
+      const mins=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000);
+      const h=Math.floor(mins/60);const m=mins%60;
+      return h>0?(m>0?`${h}h ${m}m`:`${h}h`):`${m}m`;
+    };
     return(
       <div style={{position:"fixed",bottom:24,right:24,width:300,background:D.card,border:`1.5px solid ${color}55`,borderRadius:14,padding:18,zIndex:50,boxShadow:"0 8px 32px rgba(0,0,0,0.5)"}}>
+        {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
           <div style={{flex:1,paddingRight:8}}>
-            {/* Calendar name badge */}
             {ev.calendarName&&(
               <div style={{display:"inline-flex",alignItems:"center",gap:4,marginBottom:6,padding:"2px 8px",borderRadius:20,background:color+"22",border:`1px solid ${color}44`}}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:color,display:"inline-block"}}/>
                 <span style={{fontSize:10,fontWeight:600,color}}>{ev.calendarName}</span>
               </div>
             )}
-            {/* Title */}
             <div style={{fontSize:15,fontWeight:700,color:D.text,marginBottom:8,lineHeight:1.4}}>{ev.summary||"(No title)"}</div>
             {/* Time */}
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
@@ -733,27 +737,18 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                 {fmtTime(ev.start?.dateTime)}
                 {ev.end?.dateTime&&<span style={{color:D.textSub}}> – {fmtTime(ev.end.dateTime)}</span>}
               </span>
-              {(()=>{
-                if(!ev.start?.dateTime||!ev.end?.dateTime) return null;
-                const mins=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000);
-                const h=Math.floor(mins/60);const m=mins%60;
-                const dur=h>0?(m>0?`${h}h ${m}m`:`${h}h`):`${m}m`;
-                return<span style={{fontSize:11,color:D.textMuted,background:D.surface,padding:"1px 7px",borderRadius:20,border:`1px solid ${D.border}`}}>{dur}</span>;
-              })()}
+              {getDur()&&<span style={{fontSize:11,color:D.textMuted,background:D.surface,padding:"1px 7px",borderRadius:20,border:`1px solid ${D.border}`}}>{getDur()}</span>}
             </div>
             {/* Meeting link */}
-            {(ev.location?.startsWith("http")||(ev.isGoogleMeet&&ev.meetLink))&&(
+            {ml&&(
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
-                <a href={ev.location?.startsWith("http")?ev.location:ev.meetLink}
-                  target="_blank" rel="noreferrer"
-                  style={{fontSize:13,fontWeight:600,textDecoration:"none",
-                    color:ev.location?.includes("zoom")?"#2196F3":"#4CAF50"}}>
-                  {ev.location?.includes("zoom")?"Join Zoom Meeting":"Join Google Meet"}
+                <a href={ml.url} target="_blank" rel="noreferrer"
+                  style={{fontSize:13,fontWeight:600,textDecoration:"none",color:ml.color}}>
+                  {ml.label}
                 </a>
               </div>
             )}
-            {/* Attendees */}
             {ev.numAttendees>0&&(
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <span style={{fontSize:13,color:D.textSub}}>👥</span>
@@ -769,14 +764,12 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
             <div style={{width:24,height:24,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff",flexShrink:0}}>{linked.name.charAt(0).toUpperCase()}</div>
             <div style={{flex:1}}>
               <div style={{fontSize:12,fontWeight:600,color:D.text}}>{linked.name}</div>
-              <div style={{fontSize:10,color:D.textMuted}}><StageBadge stage={linked.stage}/></div>
             </div>
             <button onClick={()=>setCalLinks(p=>{const n={...p};delete n[evKey];return n;})} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
           </div>
         ):(
           <button onClick={()=>setShowLink(v=>!v)} style={{...S.btnSm,fontSize:12,color:D.accent,borderColor:D.accent+"66",width:"100%",marginBottom:10}}>🔗 Link to Contact</button>
         )}
-        {/* Contact search */}
         {showLink&&(
           <div style={{background:D.surface,borderRadius:8,border:`1px solid ${D.border}`,overflow:"hidden",marginBottom:10}}>
             <input autoFocus value={linkSearch} onChange={e=>setLinkSearch(e.target.value)} placeholder="Search contacts…"
@@ -788,20 +781,15 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                   onMouseEnter={e=>e.currentTarget.style.background="#1A2535"}
                   onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                   <div style={{width:22,height:22,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#fff",flexShrink:0}}>{c.name.charAt(0).toUpperCase()}</div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,color:D.text}}>{c.name}</div>
-                    {c.company&&<div style={{fontSize:11,color:D.textMuted}}>{c.company}</div>}
-                  </div>
+                  <div style={{flex:1}}><div style={{fontSize:12,color:D.text}}>{c.name}</div>{c.company&&<div style={{fontSize:11,color:D.textMuted}}>{c.company}</div>}</div>
                   <StageBadge stage={c.stage}/>
                 </div>
               ))}
             </div>
           </div>
         )}
-        {/* Footer */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:`1px solid ${D.border}`,paddingTop:10,marginTop:2}}>
-          <span style={{fontSize:11,color:D.textMuted}}>{ev.calendarName||"Calendar"}</span>
-          {ev.htmlLink&&<a href={ev.htmlLink} target="_blank" rel="noreferrer" style={{fontSize:12,color:D.accent,textDecoration:"none"}}>Open in Google Calendar ↗</a>}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:`1px solid ${D.border}`,paddingTop:10}}>
+          <span style={{fontSize:11,color:D.textMuted}}>{ev.calendarName||""}</span>
         </div>
       </div>
     );
@@ -914,14 +902,15 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                             const{top,height,color,width,left}=evStyle(ev,ei,dayEvs.length);
                             const evKey=makeEvKey(ev);
                             const linked=calLinks[evKey]?contacts.find(c=>c.id===calLinks[evKey]):null;
+                            const ml=getEventMeetingLink(ev);
                             return(
                               <div key={ei}
                                 onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
-                                style={{position:"absolute",left,width,top:top-(h*56),height,background:color+"33",border:`1.5px solid ${color}`,borderRadius:5,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"2px 5px",boxSizing:"border-box"}}>
-                                <div style={{fontSize:10,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
-                                {height>22&&<div style={{fontSize:9,color:color+"dd"}}>{fmtTime(ev.start?.dateTime)}{ev.end?.dateTime?` – ${fmtTime(ev.end.dateTime)}`:""}</div>}
-                                {height>44&&ev.location&&ev.location.startsWith("http")&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>🔗 {ev.location.includes("zoom")?"Zoom":ev.location.includes("meet.google")?"Meet":"Link"}</div>}
-                                {height>44&&linked&&<div style={{fontSize:9,color:color+"bb",marginTop:1}}>👤 {linked.name}</div>}
+                                style={{position:"absolute",left,width,top:top-(h*HOUR_HEIGHT),height,background:color+"22",border:`1.5px solid ${color}`,borderRadius:6,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"4px 6px",boxSizing:"border-box"}}>
+                                <div style={{fontSize:11,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
+                                <div style={{fontSize:10,color:color+"cc",lineHeight:1.3,whiteSpace:"nowrap",overflow:"hidden"}}>{fmtTime(ev.start?.dateTime)}{ev.end?.dateTime?` – ${fmtTime(ev.end.dateTime)}`:""}</div>
+                                {ml&&<div style={{fontSize:10,lineHeight:1.3,display:"flex",alignItems:"center",gap:3,overflow:"hidden",color:ml.color}}><span>🔗</span><span style={{overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ml.label.replace("Join ","").replace(" Meeting","")}</span></div>}
+                                {linked&&<div style={{fontSize:10,color:color+"cc",lineHeight:1.3,display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}><div style={{width:12,height:12,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:700,color:"#fff",flexShrink:0}}>{linked.name.charAt(0).toUpperCase()}</div><span style={{overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",fontWeight:600}}>{linked.name}</span></div>}
                               </div>
                             );
                           });
@@ -945,8 +934,8 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
 function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
   const activeContacts=contacts.filter(c=>!c.cold);
   const coldContacts=contacts.filter(c=>c.cold);
-  const[upcomingEvs, setUpcomingEvs]=useState([]);
-  const[loadingEvs,  setLoadingEvs] =useState(true);
+  const[upcomingEvs,setUpcomingEvs]=useState([]);
+  const[loadingEvs, setLoadingEvs]=useState(true);
 
   const urgentCount=activeContacts.filter(c=>{const u=getUrgency(c);return u&&(u.level==="overdue"||u.level==="today");}).length
     +followups.filter(f=>{if(f.done||!f.date)return false;const u=getDateUrgency(f.date);return u.level==="overdue"||u.level==="today";}).length;
@@ -1116,7 +1105,6 @@ function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTa
   const today  =allItems.filter(x=>x.u&&x.u.level==="today");
   const soon   =allItems.filter(x=>x.u&&x.u.level==="soon");
   const upcoming=allItems.filter(x=>x.u&&!["overdue","today","soon"].includes(x.u.level));
-
   const Section=({title,color,items})=>{
     if(!items.length) return null;
     return(
@@ -1148,7 +1136,6 @@ function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTa
       </div>
     );
   };
-
   return(
     <div>
       <BackHome switchTab={switchTab}/>
@@ -1181,7 +1168,7 @@ class ErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={error:null};}
   static getDerivedStateFromError(e){return{error:e};}
   render(){
-    if(this.state.error) return(
+    if(this.state.error)return(
       <div style={{padding:30,color:"#F87171"}}>
         <p style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong.</p>
         <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8}}>{this.state.error?.message}</pre>
@@ -1195,7 +1182,7 @@ class RootErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={error:null};}
   static getDerivedStateFromError(e){return{error:e};}
   render(){
-    if(this.state.error) return(
+    if(this.state.error)return(
       <div style={{minHeight:"100vh",background:"#080C14",display:"flex",alignItems:"center",justifyContent:"center",padding:30,fontFamily:"'DM Sans',sans-serif"}}>
         <div style={{maxWidth:540,width:"100%"}}>
           <p style={{color:"#F87171",fontWeight:700,fontSize:18,marginBottom:10}}>BridgeFlow ran into a problem</p>
@@ -1392,7 +1379,7 @@ function App(){
                       <div style={{fontSize:13,color:D.textSub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.company,c.email].filter(Boolean).join(" · ")}</div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0}}>
-                      {u&&<UrgencyBadge contact={c}/>}
+                      {u&&<RawUrgencyBadge u={u}/>}
                       {(c.conversations?.length||0)>0&&<div style={{fontSize:12,color:D.textMuted,marginTop:4}}>{c.conversations.length} note{c.conversations.length>1?"s":""}</div>}
                     </div>
                   </div>
