@@ -742,16 +742,26 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
               })()}
             </div>
             {/* Location / Meeting link */}
-            {ev.location&&ev.location.startsWith("http")&&(
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
-                <a href={ev.location} target="_blank" rel="noreferrer"
-                  style={{fontSize:13,fontWeight:500,textDecoration:"none",
-                    color:ev.location.includes("zoom")?"#2196F3":ev.location.includes("meet.google")?"#4CAF50":D.accent}}>
-                  {ev.location.includes("zoom")?"Join Zoom Meeting":ev.location.includes("meet.google")?"Join Google Meet":"Join Meeting"}
-                </a>
-              </div>
-            )}
+            {(ev.location||ev.gcalLink)&&(()=>{
+              const loc=ev.location||"";
+              const isGcalFallback=loc.startsWith("gcal:");
+              const gcalUrl=isGcalFallback?loc.replace("gcal:",""):ev.gcalLink;
+              const isZoom=loc.includes("zoom.us");
+              const isMeet=loc.includes("meet.google");
+              const href=isGcalFallback?gcalUrl:loc;
+              const label=isZoom?"Join Zoom Meeting":isMeet?"Join Google Meet":isGcalFallback?"Join Google Meet":"Join Meeting";
+              const color=isZoom?"#2196F3":"#4CAF50";
+              if(!loc.startsWith("http")&&!isGcalFallback) return null;
+              return(
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                  <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
+                  <a href={href} target="_blank" rel="noreferrer"
+                    style={{fontSize:13,fontWeight:500,textDecoration:"none",color}}>
+                    {label}
+                  </a>
+                </div>
+              );
+            })()}
             {/* Attendees */}
             {ev.numAttendees>0&&(
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
