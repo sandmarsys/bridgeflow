@@ -741,27 +741,24 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                 return<span style={{fontSize:11,color:D.textMuted,background:D.surface,padding:"1px 7px",borderRadius:20,border:`1px solid ${D.border}`}}>{dur}</span>;
               })()}
             </div>
-            {/* Location / Meeting link */}
-            {(ev.location||ev.gcalLink)&&(()=>{
-              const loc=ev.location||"";
-              const isGcalFallback=loc.startsWith("gcal:");
-              const gcalUrl=isGcalFallback?loc.replace("gcal:",""):ev.gcalLink;
-              const isZoom=loc.includes("zoom.us");
-              const isMeet=loc.includes("meet.google");
-              const href=isGcalFallback?gcalUrl:loc;
-              const label=isZoom?"Join Zoom Meeting":isMeet?"Join Google Meet":isGcalFallback?"Join Google Meet":"Join Meeting";
-              const color=isZoom?"#2196F3":"#4CAF50";
-              if(!loc.startsWith("http")&&!isGcalFallback) return null;
-              return(
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                  <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
-                  <a href={href} target="_blank" rel="noreferrer"
-                    style={{fontSize:13,fontWeight:500,textDecoration:"none",color}}>
-                    {label}
+            {/* Meeting link */}
+            {(ev.location?.startsWith("http")||ev.isGoogleMeet)&&(
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
+                {ev.location?.startsWith("http")?(
+                  <a href={ev.location} target="_blank" rel="noreferrer"
+                    style={{fontSize:13,fontWeight:600,textDecoration:"none",
+                      color:ev.location.includes("zoom")?"#2196F3":"#4CAF50"}}>
+                    {ev.location.includes("zoom")?"Join Zoom Meeting":"Join Google Meet"}
                   </a>
-                </div>
-              );
-            })()}
+                ):(
+                  <a href={ev.htmlLink} target="_blank" rel="noreferrer"
+                    style={{fontSize:13,fontWeight:600,textDecoration:"none",color:"#4CAF50"}}>
+                    Join Google Meet →
+                  </a>
+                )}
+              </div>
+            )}
             {/* Attendees */}
             {ev.numAttendees>0&&(
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
