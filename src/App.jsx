@@ -742,16 +742,14 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
               })()}
             </div>
             {/* Location / Meeting link */}
-            {ev.location&&(
-              <div style={{display:"flex",alignItems:"flex-start",gap:6,marginBottom:6}}>
+            {ev.location&&ev.location.startsWith("http")&&(
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
-                {ev.location.startsWith("http")
-                  ?<a href={ev.location} target="_blank" rel="noreferrer"
-                      style={{fontSize:13,color:D.accent,textDecoration:"none",fontWeight:500,wordBreak:"break-all"}}>
-                      {ev.location.includes("zoom")?"Join Zoom Meeting":ev.location.includes("meet.google")?"Join Google Meet":"Join Meeting"}
-                    </a>
-                  :<span style={{fontSize:13,color:D.textSub}}>{ev.location}</span>
-                }
+                <a href={ev.location} target="_blank" rel="noreferrer"
+                  style={{fontSize:13,fontWeight:500,textDecoration:"none",
+                    color:ev.location.includes("zoom")?"#2196F3":ev.location.includes("meet.google")?"#4CAF50":D.accent}}>
+                  {ev.location.includes("zoom")?"Join Zoom Meeting":ev.location.includes("meet.google")?"Join Google Meet":"Join Meeting"}
+                </a>
               </div>
             )}
             {/* Attendees */}
