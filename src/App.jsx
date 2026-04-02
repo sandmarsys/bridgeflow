@@ -742,21 +742,15 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
               })()}
             </div>
             {/* Meeting link */}
-            {(ev.location?.startsWith("http")||ev.isGoogleMeet)&&(
+            {(ev.location?.startsWith("http")||(ev.isGoogleMeet&&ev.meetLink))&&(
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
                 <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>📍</span>
-                {ev.location?.startsWith("http")?(
-                  <a href={ev.location} target="_blank" rel="noreferrer"
-                    style={{fontSize:13,fontWeight:600,textDecoration:"none",
-                      color:ev.location.includes("zoom")?"#2196F3":"#4CAF50"}}>
-                    {ev.location.includes("zoom")?"Join Zoom Meeting":"Join Google Meet"}
-                  </a>
-                ):(
-                  <a href={ev.htmlLink} target="_blank" rel="noreferrer"
-                    style={{fontSize:13,fontWeight:600,textDecoration:"none",color:"#4CAF50"}}>
-                    Join Google Meet →
-                  </a>
-                )}
+                <a href={ev.location?.startsWith("http")?ev.location:ev.meetLink}
+                  target="_blank" rel="noreferrer"
+                  style={{fontSize:13,fontWeight:600,textDecoration:"none",
+                    color:ev.location?.includes("zoom")?"#2196F3":"#4CAF50"}}>
+                  {ev.location?.includes("zoom")?"Join Zoom Meeting":"Join Google Meet"}
+                </a>
               </div>
             )}
             {/* Attendees */}
