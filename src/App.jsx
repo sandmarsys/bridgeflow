@@ -134,6 +134,172 @@ function normalizeContact(c) {
   };
 }
 
+// ── IMPORT MODAL ─────────────────────────────────────────────────────────────
+function ImportModal({contacts,onImport,onClose}){
+  const[url,     setUrl]     = useState("");
+  const[step,    setStep]    = useState("input"); // input | loading | preview | done
+  const[preview, setPreview] = useState([]);
+  const[skipped, setSkipped] = useState(0);
+  const[err,     setErr]     = useState("");
+
+  const existingNames  = new Set(contacts.map(c=>c.name.trim().toLowerCase()));
+  const existingEmails = new Set(contacts.map(c=>(c.email||"").trim().toLowerCase()).filter(Boolean));
+
+  // Normalize header to a known field
+  function mapHeader(h){
+    const s=(h||"").toLowerCase().trim();
+    if(["name","full name","contact name","first name"].some(k=>s.includes(k))) return "name";
+    if(["email","e-mail","email address"].some(k=>s.includes(k)))               return "email";
+    if(["phone","mobile","cell","telephone"].some(k=>s.includes(k)))            return "phone";
+    if(["company","organization","business","employer"].some(k=>s.includes(k))) return "company";
+    if(["linkedin","linkedin url","profile","linkedin profile"].some(k=>s.includes(k))) return "linkedin";
+    if(["role","title","job title","position","what they do","what do they do","occupation","industry"].some(k=>s.includes(k))) return "role";
+    if(["notes","note","comments","comment","about"].some(k=>s.includes(k)))    return "notes";
+    if(["whatsapp","whatsapp number"].some(k=>s.includes(k)))                   return "whatsapp";
+    return null;
+  }
+
+  async function fetchSheet(){
+    setErr(""); setStep("loading");
+    try{
+      const encoded=encodeURIComponent(url.trim());
+      const res=await fetch(APPS_SCRIPT_URL+"?action=importSheet&sheetUrl="+encoded);
+      const json=await res.json();
+      if(!json.ok) throw new Error(json.error||"Could not read sheet");
+      const rows=json.rows;
+      if(!rows||rows.length<2) throw new Error("Sheet appears empty or has only a header row");
+
+      const headers=rows[0];
+      const fieldMap=headers.map(mapHeader);
+      const parsed=[];
+      let skip=0;
+
+      for(let i=1;i<rows.length;i++){
+        const row=rows[i];
+        const obj={name:"",email:"",phone:"",company:"",linkedin:"",whatsapp:"",notes:"",role:""};
+        fieldMap.forEach((field,ci)=>{
+          if(field&&row[ci]) obj[field]=(obj[field]?obj[field]+" ":"")+String(row[ci]).trim();
+        });
+        if(!obj.name.trim()) continue;
+        // Build notes: combine role + any existing notes
+        const notesParts=[];
+        if(obj.role) notesParts.push(obj.role);
+        if(obj.notes) notesParts.push(obj.notes);
+        obj.notes=notesParts.join(" · ");
+        delete obj.role;
+        // Duplicate check
+        const nameLow=obj.name.trim().toLowerCase();
+        const emailLow=(obj.email||"").trim().toLowerCase();
+        if(existingNames.has(nameLow)||(emailLow&&existingEmails.has(emailLow))){skip++;continue;}
+        parsed.push(obj);
+      }
+      setPreview(parsed);
+      setSkipped(skip);
+      setStep("preview");
+    }catch(e){setErr(e.message);setStep("input");}
+  }
+
+  function confirmImport(){
+    const today=todayStr();
+    const coldFollowUpDate=addMonths(today,3);
+    const newContacts=preview.map(p=>normalizeContact({
+      ...p,
+      id:Date.now().toString()+Math.random().toString(36).slice(2),
+      createdAt:new Date().toISOString(),
+      conversations:[],
+      stageEnteredAt:today,
+      cadenceCompleted:[],
+      cold:true,
+      coldSince:today,
+      coldFollowUpDate,
+      stage:"Connection",
+    }));
+    onImport(newContacts,skipped);
+  }
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:28,width:"100%",maxWidth:560,maxHeight:"85vh",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h2 style={{margin:0,fontSize:18,fontWeight:700,color:D.text}}>📥 Import from Google Sheet</h2>
+          <button onClick={onClose} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
+        </div>
+
+        {step==="input"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{background:D.surface,borderRadius:10,padding:"12px 14px",fontSize:13,color:D.textSub,lineHeight:1.7,border:`1px solid ${D.border}`}}>
+              <strong style={{color:D.text}}>Before importing:</strong> make sure your Google Sheet is shared so anyone with the link can view it. Paste the full sheet URL below.
+            </div>
+            <div>
+              <label style={S.lbl}>Google Sheet URL</label>
+              <input value={url} onChange={e=>setUrl(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/…"
+                style={{...S.inp,fontSize:13}}/>
+            </div>
+            <div style={{background:"#0D1828",borderRadius:8,padding:"10px 14px",fontSize:12,color:D.textSub,border:`1px solid ${D.border}`}}>
+              <strong style={{color:D.textSub}}>Supported columns:</strong> Name, Role / What they do, LinkedIn, Email, Phone, Company, WhatsApp, Notes. Column order doesn't matter.
+            </div>
+            {err&&<p style={{margin:0,fontSize:12,color:D.red}}>{err}</p>}
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={fetchSheet} disabled={!url.trim()} style={{...S.btn1,flex:1}}>Preview Contacts →</button>
+              <button onClick={onClose} style={S.btn2}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {step==="loading"&&(
+          <div style={{textAlign:"center",padding:"40px 20px",color:D.textMuted}}>
+            <div style={{fontSize:32,marginBottom:12,animation:"pulse 1s infinite"}}>⏳</div>
+            <p style={{fontSize:14}}>Reading your sheet…</p>
+          </div>
+        )}
+
+        {step==="preview"&&(
+          <>
+            <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+              <span style={{fontSize:13,color:D.green,background:"#0D2210",padding:"4px 12px",borderRadius:20,fontWeight:600}}>✓ {preview.length} ready to import</span>
+              {skipped>0&&<span style={{fontSize:13,color:D.textMuted,background:D.surface,padding:"4px 12px",borderRadius:20}}>{skipped} duplicate{skipped>1?"s":""} skipped</span>}
+            </div>
+            {preview.length===0?(
+              <div style={{textAlign:"center",padding:"30px 20px",color:D.textMuted}}>
+                <p style={{fontSize:14}}>All contacts already exist in BridgeFlow.</p>
+              </div>
+            ):(
+              <div style={{flex:1,overflowY:"auto",marginBottom:14,borderRadius:8,border:`1px solid ${D.border}`}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead>
+                    <tr style={{background:D.surface,position:"sticky",top:0}}>
+                      {["Name","Role / Notes","LinkedIn","Email"].map(h=>(
+                        <th key={h} style={{padding:"8px 12px",textAlign:"left",color:D.textSub,fontWeight:600,borderBottom:`1px solid ${D.border}`,whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((p,i)=>(
+                      <tr key={i} style={{borderBottom:`1px solid ${D.border+"66"}`}}>
+                        <td style={{padding:"8px 12px",color:D.text,fontWeight:500,whiteSpace:"nowrap"}}>{p.name}</td>
+                        <td style={{padding:"8px 12px",color:D.textSub,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.notes||"—"}</td>
+                        <td style={{padding:"8px 12px"}}>
+                          {p.linkedin?<a href={p.linkedin.startsWith("http")?p.linkedin:`https://${p.linkedin}`} target="_blank" rel="noreferrer" style={{color:D.accent,fontSize:11}}>View</a>:<span style={{color:D.textMuted}}>—</span>}
+                        </td>
+                        <td style={{padding:"8px 12px",color:D.textSub,whiteSpace:"nowrap"}}>{p.email||"—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{display:"flex",gap:10}}>
+              {preview.length>0&&<button onClick={confirmImport} style={{...S.btn1,flex:1}}>❄️ Import {preview.length} to Cold List</button>}
+              <button onClick={()=>setStep("input")} style={S.btn2}>← Back</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── SHEETS SYNC ───────────────────────────────────────────────────────────────
 function contactsToRows(contacts){
   return[
@@ -1216,6 +1382,7 @@ function App(){
   const[newFU,       setNewFU]       = useState({date:"",note:""});
   const[showFU,      setShowFU]      = useState(false);
   const[showSettings,setShowSettings]= useState(false);
+  const[showImport,  setShowImport]  = useState(false);
   const[syncState,   setSyncState]   = useState("idle");
   const[syncMsg,     setSyncMsg]     = useState("");
   const[toast,       setToast]       = useState(null);
@@ -1357,7 +1524,10 @@ function App(){
                 <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>Contacts</h1>
                 <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{activeContacts.length} active · {coldContacts.length} cold</p>
               </div>
-              <button onClick={addContactAction} style={S.btn1}>+ Add Contact</button>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setShowImport(true)} style={{...S.btn2,fontSize:13,padding:"8px 14px"}}>📥 Import</button>
+                <button onClick={addContactAction} style={S.btn1}>+ Add Contact</button>
+              </div>
             </div>
             <div style={{display:"flex",gap:10,marginBottom:18}}>
               <input placeholder="Search contacts…" value={search} onChange={e=>setSearch(e.target.value)}
@@ -1399,6 +1569,7 @@ function App(){
         {view==="add"      &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView} switchTab={switchTab}/>}
       </div>
 
+      {showImport&&<ImportModal contacts={contacts} onImport={(newC,skipped)=>{setContacts(prev=>[...newC,...prev]);setShowImport(false);showToast(`${newC.length} contacts imported to Cold list${skipped>0?`, ${skipped} duplicate${skipped>1?"s":""} skipped`:""}!`);}} onClose={()=>setShowImport(false)}/>}
       {showSettings&&<SettingsModal syncState={syncState} syncMsg={syncMsg} exportBackup={exportBackup} importBackup={importBackup} onClose={()=>setShowSettings(false)}/>}
       {toast&&(
         <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:toast.type==="err"?"#3D1515":"#0D2210",border:`1px solid ${toast.type==="err"?"#7F1D1D":"#166534"}`,color:toast.type==="err"?"#FCA5A5":"#86EFAC",borderRadius:10,padding:"11px 20px",fontSize:14,fontWeight:500,zIndex:200,whiteSpace:"nowrap",boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>
