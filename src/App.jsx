@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 const STORAGE_KEY   = "bf-contacts-v3";
 const FOLLOWUP_KEY  = "bf-followups-v3";
 const CAL_LINKS_KEY = "bf-cal-links-v1";
+const WARM_KEY      = "bf-warm-v1";
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyukMZkIN9kJLNX3Gg2L-xYZpudEFHEgvvCQK_RNQnn9yBdRZr1CCIyKfdOvncA00YjRg/exec";
 
 const STAGES = ["Connection","Conversation","Commitment","Client","Continuation"];
@@ -23,6 +24,7 @@ const D = {
   text:"#E8EEF7", textSub:"#6B82A0", textMuted:"#3A4F68",
   accent:"#3B82F6", green:"#22C55E", red:"#EF4444", yellow:"#F59E0B",
   coldBorder:"#2A3A50", coldText:"#7A9BB5",
+  warmBorder:"#3A2A10", warmText:"#F59E0B",
 };
 const S = {
   btn1:  {background:D.accent,color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,fontFamily:"inherit",cursor:"pointer",fontWeight:500},
@@ -91,29 +93,21 @@ function getDateUrgency(dateStr) {
   if(diff<=2)  return{level:"soon",  color:D.yellow, label:`Due in ${diff}d`,diff};
   return       {level:"upcoming",   color:D.textSub, label:`Due in ${diff}d`,diff};
 }
-
-// Key for matching calendar events by title+date
 function makeEvKey(ev) {
   const dt=ev.start?.dateTime||ev.start?.date||"";
   return`${(ev.summary||"").trim().toLowerCase()}::${dt.split("T")[0]}`;
 }
-
-// ── FIX: Get the meeting link from the event ──────────────────────────────────
-// Priority: hangoutLink (direct meet.google.com URL) → location URL → Google Meet via htmlLink
 function getEventMeetingLink(ev) {
-  // 1. Direct hangout link — this is the real meet.google.com/xxx-xxxx-xxx URL
   if(ev.hangoutLink) return{url:ev.hangoutLink,label:"Join Google Meet",color:"#4CAF50"};
-  // 2. Location field with a URL (e.g. Zoom via Calendly)
   if(ev.location&&ev.location.startsWith("http")){
     const isZoom=ev.location.toLowerCase().includes("zoom");
     return{url:ev.location,label:isZoom?"Join Zoom Meeting":"Join Meeting",color:"#2196F3"};
   }
-  // 3. Fallback: event was flagged as Google Meet but no hangoutLink came through
   if(ev.isGoogleMeet&&ev.meetHtmlLink) return{url:ev.meetHtmlLink,label:"Open in Google Calendar",color:"#4CAF50"};
   return null;
 }
 
-const emptyContact={name:"",company:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:""};
+const emptyContact={name:"",company:"",title:"",coaching:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:""};
 const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:"",calendarId:"e.sand@marketingeddie.com"});
 
 function normalizeContact(c) {
@@ -122,8 +116,8 @@ function normalizeContact(c) {
   const safeEnteredAt=str(c.stageEnteredAt)||(c.createdAt?str(c.createdAt).split("T")[0]:todayStr());
   return{
     ...c,
-    name:str(c.name),company:str(c.company),email:str(c.email),phone:str(c.phone),
-    whatsapp:str(c.whatsapp),linkedin:str(c.linkedin),notes:str(c.notes),
+    name:str(c.name),company:str(c.company),title:str(c.title),coaching:str(c.coaching),
+    email:str(c.email),phone:str(c.phone),whatsapp:str(c.whatsapp),linkedin:str(c.linkedin),notes:str(c.notes),
     stage:str(c.stage)||"Connection",
     createdAt:str(c.createdAt)||new Date().toISOString(),
     stageEnteredAt:safe(safeEnteredAt).split("T")[0],
@@ -133,178 +127,21 @@ function normalizeContact(c) {
     cold:c.cold===true||c.cold==="TRUE",
   };
 }
-
-// ── IMPORT MODAL ─────────────────────────────────────────────────────────────
-function ImportModal({contacts,onImport,onClose}){
-  const[url,     setUrl]     = useState("");
-  const[step,    setStep]    = useState("input"); // input | loading | preview | done
-  const[preview, setPreview] = useState([]);
-  const[skipped, setSkipped] = useState(0);
-  const[err,     setErr]     = useState("");
-
-  const existingNames  = new Set(contacts.map(c=>c.name.trim().toLowerCase()));
-  const existingEmails = new Set(contacts.map(c=>(c.email||"").trim().toLowerCase()).filter(Boolean));
-
-  // Normalize header to a known field
-  function mapHeader(h){
-    const s=(h||"").toLowerCase().trim();
-    if(["name","full name","contact name","first name"].some(k=>s.includes(k))) return "name";
-    if(["email","e-mail","email address"].some(k=>s.includes(k)))               return "email";
-    if(["phone","mobile","cell","telephone"].some(k=>s.includes(k)))            return "phone";
-    if(["company","organization","business","employer"].some(k=>s.includes(k))) return "company";
-    if(["linkedin","linkedin url","profile","linkedin profile"].some(k=>s.includes(k))) return "linkedin";
-    if(["role","title","job title","position","what they do","what do they do","occupation","industry"].some(k=>s.includes(k))) return "role";
-    if(["notes","note","comments","comment","about"].some(k=>s.includes(k)))    return "notes";
-    if(["whatsapp","whatsapp number"].some(k=>s.includes(k)))                   return "whatsapp";
-    return null;
-  }
-
-  async function fetchSheet(){
-    setErr(""); setStep("loading");
-    try{
-      const encoded=encodeURIComponent(url.trim());
-      const res=await fetch(APPS_SCRIPT_URL+"?action=importSheet&sheetUrl="+encoded);
-      const json=await res.json();
-      if(!json.ok) throw new Error(json.error||"Could not read sheet");
-      const rows=json.rows;
-      if(!rows||rows.length<2) throw new Error("Sheet appears empty or has only a header row");
-
-      const headers=rows[0];
-      const fieldMap=headers.map(mapHeader);
-      const parsed=[];
-      let skip=0;
-
-      for(let i=1;i<rows.length;i++){
-        const row=rows[i];
-        const obj={name:"",email:"",phone:"",company:"",linkedin:"",whatsapp:"",notes:"",role:""};
-        fieldMap.forEach((field,ci)=>{
-          if(field&&row[ci]) obj[field]=(obj[field]?obj[field]+" ":"")+String(row[ci]).trim();
-        });
-        if(!obj.name.trim()) continue;
-        // Build notes: combine role + any existing notes
-        const notesParts=[];
-        if(obj.role) notesParts.push(obj.role);
-        if(obj.notes) notesParts.push(obj.notes);
-        obj.notes=notesParts.join(" · ");
-        delete obj.role;
-        // Duplicate check
-        const nameLow=obj.name.trim().toLowerCase();
-        const emailLow=(obj.email||"").trim().toLowerCase();
-        if(existingNames.has(nameLow)||(emailLow&&existingEmails.has(emailLow))){skip++;continue;}
-        parsed.push(obj);
-      }
-      setPreview(parsed);
-      setSkipped(skip);
-      setStep("preview");
-    }catch(e){setErr(e.message);setStep("input");}
-  }
-
-  function confirmImport(){
-    const today=todayStr();
-    const coldFollowUpDate=addMonths(today,3);
-    const newContacts=preview.map(p=>normalizeContact({
-      ...p,
-      id:Date.now().toString()+Math.random().toString(36).slice(2),
-      createdAt:new Date().toISOString(),
-      conversations:[],
-      stageEnteredAt:today,
-      cadenceCompleted:[],
-      cold:true,
-      coldSince:today,
-      coldFollowUpDate,
-      stage:"Connection",
-    }));
-    onImport(newContacts,skipped);
-  }
-
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:28,width:"100%",maxWidth:560,maxHeight:"85vh",display:"flex",flexDirection:"column"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <h2 style={{margin:0,fontSize:18,fontWeight:700,color:D.text}}>📥 Import from Google Sheet</h2>
-          <button onClick={onClose} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
-        </div>
-
-        {step==="input"&&(
-          <div style={{display:"flex",flexDirection:"column",gap:14}}>
-            <div style={{background:D.surface,borderRadius:10,padding:"12px 14px",fontSize:13,color:D.textSub,lineHeight:1.7,border:`1px solid ${D.border}`}}>
-              <strong style={{color:D.text}}>Before importing:</strong> make sure your Google Sheet is shared so anyone with the link can view it. Paste the full sheet URL below.
-            </div>
-            <div>
-              <label style={S.lbl}>Google Sheet URL</label>
-              <input value={url} onChange={e=>setUrl(e.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/d/…"
-                style={{...S.inp,fontSize:13}}/>
-            </div>
-            <div style={{background:"#0D1828",borderRadius:8,padding:"10px 14px",fontSize:12,color:D.textSub,border:`1px solid ${D.border}`}}>
-              <strong style={{color:D.textSub}}>Supported columns:</strong> Name, Role / What they do, LinkedIn, Email, Phone, Company, WhatsApp, Notes. Column order doesn't matter.
-            </div>
-            {err&&<p style={{margin:0,fontSize:12,color:D.red}}>{err}</p>}
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={fetchSheet} disabled={!url.trim()} style={{...S.btn1,flex:1}}>Preview Contacts →</button>
-              <button onClick={onClose} style={S.btn2}>Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {step==="loading"&&(
-          <div style={{textAlign:"center",padding:"40px 20px",color:D.textMuted}}>
-            <div style={{fontSize:32,marginBottom:12,animation:"pulse 1s infinite"}}>⏳</div>
-            <p style={{fontSize:14}}>Reading your sheet…</p>
-          </div>
-        )}
-
-        {step==="preview"&&(
-          <>
-            <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
-              <span style={{fontSize:13,color:D.green,background:"#0D2210",padding:"4px 12px",borderRadius:20,fontWeight:600}}>✓ {preview.length} ready to import</span>
-              {skipped>0&&<span style={{fontSize:13,color:D.textMuted,background:D.surface,padding:"4px 12px",borderRadius:20}}>{skipped} duplicate{skipped>1?"s":""} skipped</span>}
-            </div>
-            {preview.length===0?(
-              <div style={{textAlign:"center",padding:"30px 20px",color:D.textMuted}}>
-                <p style={{fontSize:14}}>All contacts already exist in BridgeFlow.</p>
-              </div>
-            ):(
-              <div style={{flex:1,overflowY:"auto",marginBottom:14,borderRadius:8,border:`1px solid ${D.border}`}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                  <thead>
-                    <tr style={{background:D.surface,position:"sticky",top:0}}>
-                      {["Name","Role / Notes","LinkedIn","Email"].map(h=>(
-                        <th key={h} style={{padding:"8px 12px",textAlign:"left",color:D.textSub,fontWeight:600,borderBottom:`1px solid ${D.border}`,whiteSpace:"nowrap"}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.map((p,i)=>(
-                      <tr key={i} style={{borderBottom:`1px solid ${D.border+"66"}`}}>
-                        <td style={{padding:"8px 12px",color:D.text,fontWeight:500,whiteSpace:"nowrap"}}>{p.name}</td>
-                        <td style={{padding:"8px 12px",color:D.textSub,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.notes||"—"}</td>
-                        <td style={{padding:"8px 12px"}}>
-                          {p.linkedin?<a href={p.linkedin.startsWith("http")?p.linkedin:`https://${p.linkedin}`} target="_blank" rel="noreferrer" style={{color:D.accent,fontSize:11}}>View</a>:<span style={{color:D.textMuted}}>—</span>}
-                        </td>
-                        <td style={{padding:"8px 12px",color:D.textSub,whiteSpace:"nowrap"}}>{p.email||"—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div style={{display:"flex",gap:10}}>
-              {preview.length>0&&<button onClick={confirmImport} style={{...S.btn1,flex:1}}>❄️ Import {preview.length} to Cold List</button>}
-              <button onClick={()=>setStep("input")} style={S.btn2}>← Back</button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
+function normalizeWarm(w){
+  const str=v=>(v===null||v===undefined)?"":String(v);
+  return{
+    id:str(w.id)||Date.now().toString()+Math.random().toString(36).slice(2),
+    name:str(w.name),company:str(w.company),title:str(w.title),coaching:str(w.coaching),
+    email:str(w.email),phone:str(w.phone),whatsapp:str(w.whatsapp),linkedin:str(w.linkedin),notes:str(w.notes),
+    addedAt:str(w.addedAt)||new Date().toISOString(),
+  };
 }
 
 // ── SHEETS SYNC ───────────────────────────────────────────────────────────────
 function contactsToRows(contacts){
   return[
-    ["id","name","company","email","phone","whatsapp","linkedin","stage","notes","createdAt","conversations","stageEnteredAt","cadenceCompleted","cold","coldSince","coldFollowUpDate"],
-    ...contacts.map(c=>[c.id,c.name,c.company||"",c.email||"",c.phone||"",c.whatsapp||"",c.linkedin||"",c.stage,c.notes||"",c.createdAt,JSON.stringify(c.conversations||[]),c.stageEnteredAt||"",JSON.stringify(c.cadenceCompleted||[]),c.cold?"TRUE":"FALSE",c.coldSince||"",c.coldFollowUpDate||""])
+    ["id","name","company","title","coaching","email","phone","whatsapp","linkedin","stage","notes","createdAt","conversations","stageEnteredAt","cadenceCompleted","cold","coldSince","coldFollowUpDate"],
+    ...contacts.map(c=>[c.id,c.name,c.company||"",c.title||"",c.coaching||"",c.email||"",c.phone||"",c.whatsapp||"",c.linkedin||"",c.stage,c.notes||"",c.createdAt,JSON.stringify(c.conversations||[]),c.stageEnteredAt||"",JSON.stringify(c.cadenceCompleted||[]),c.cold?"TRUE":"FALSE",c.coldSince||"",c.coldFollowUpDate||""])
   ];
 }
 function followupsToRows(followups){
@@ -335,6 +172,158 @@ async function pullFromScript(){
   return{contacts:rowsToContacts(json.contacts),followups:rowsToFollowups(json.followups)};
 }
 
+// ── IMPORT HELPERS ────────────────────────────────────────────────────────────
+function mapHeader(h){
+  const s=(h||"").toLowerCase().trim();
+  if(["name","full name","contact name","first name"].some(k=>s.includes(k)))           return"name";
+  if(["email","e-mail","email address"].some(k=>s.includes(k)))                          return"email";
+  if(["phone","mobile","cell","telephone"].some(k=>s.includes(k)))                       return"phone";
+  if(["company","organization","business","employer"].some(k=>s.includes(k)))            return"company";
+  if(["linkedin","linkedin url","profile"].some(k=>s.includes(k)))                       return"linkedin";
+  if(["title","job title","position"].some(k=>s.includes(k)))                            return"title";
+  if(["coaching","coaching niche","niche","specialty","coaching specialty"].some(k=>s.includes(k))) return"coaching";
+  if(["role","what they do","what do they do","occupation"].some(k=>s.includes(k)))      return"notes";
+  if(["notes","note","comments","about"].some(k=>s.includes(k)))                         return"notes";
+  if(["whatsapp"].some(k=>s.includes(k)))                                                return"whatsapp";
+  return null;
+}
+async function fetchSheetRows(url){
+  const encoded=encodeURIComponent(url.trim());
+  const res=await fetch(APPS_SCRIPT_URL+"?action=importSheet&sheetUrl="+encoded);
+  const json=await res.json();
+  if(!json.ok) throw new Error(json.error||"Could not read sheet");
+  if(!json.rows||json.rows.length<2) throw new Error("Sheet appears empty or has only a header row");
+  return json.rows;
+}
+function parseRows(rows,existingNames,existingEmails){
+  const headers=rows[0];
+  const fieldMap=headers.map(mapHeader);
+  const parsed=[];let skip=0;
+  for(let i=1;i<rows.length;i++){
+    const row=rows[i];
+    const obj={name:"",email:"",phone:"",company:"",title:"",coaching:"",linkedin:"",whatsapp:"",notes:""};
+    fieldMap.forEach((field,ci)=>{if(field&&row[ci])obj[field]=(obj[field]?obj[field]+" ":"")+String(row[ci]).trim();});
+    if(!obj.name.trim()) continue;
+    const nameLow=obj.name.trim().toLowerCase();
+    const emailLow=(obj.email||"").trim().toLowerCase();
+    if(existingNames.has(nameLow)||(emailLow&&existingEmails.has(emailLow))){skip++;continue;}
+    parsed.push(obj);
+  }
+  return{parsed,skip};
+}
+
+// ── IMPORT MODAL (shared for Cold + Warm) ─────────────────────────────────────
+function ImportModal({contacts,warmContacts,mode,onImport,onClose}){
+  // mode: "cold" | "warm"
+  const[url,     setUrl]    =useState("");
+  const[step,    setStep]   =useState("input");
+  const[preview, setPreview]=useState([]);
+  const[skipped, setSkipped]=useState(0);
+  const[err,     setErr]    =useState("");
+
+  const existingNames =new Set([...contacts,...(warmContacts||[])].map(c=>c.name.trim().toLowerCase()));
+  const existingEmails=new Set([...contacts,...(warmContacts||[])].map(c=>(c.email||"").trim().toLowerCase()).filter(Boolean));
+
+  async function fetchSheet(){
+    setErr("");setStep("loading");
+    try{
+      const rows=await fetchSheetRows(url);
+      const{parsed,skip}=parseRows(rows,existingNames,existingEmails);
+      setPreview(parsed);setSkipped(skip);setStep("preview");
+    }catch(e){setErr(e.message);setStep("input");}
+  }
+
+  function confirmImport(){
+    const today=todayStr();
+    if(mode==="cold"){
+      const coldFollowUpDate=addMonths(today,3);
+      const newC=preview.map(p=>normalizeContact({...p,id:Date.now().toString()+Math.random().toString(36).slice(2),createdAt:new Date().toISOString(),conversations:[],stageEnteredAt:today,cadenceCompleted:[],cold:true,coldSince:today,coldFollowUpDate,stage:"Connection"}));
+      onImport(newC,skipped);
+    } else {
+      const newW=preview.map(p=>normalizeWarm({...p,id:Date.now().toString()+Math.random().toString(36).slice(2),addedAt:new Date().toISOString()}));
+      onImport(newW,skipped);
+    }
+  }
+
+  const isCold=mode==="cold";
+  const accentColor=isCold?"#7AB8D4":D.warmText;
+  const label=isCold?"Cold List":"Warm List";
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:28,width:"100%",maxWidth:560,maxHeight:"85vh",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h2 style={{margin:0,fontSize:18,fontWeight:700,color:D.text}}>📥 Import to {label}</h2>
+          <button onClick={onClose} style={{background:"none",border:"none",color:D.textSub,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
+        </div>
+        {step==="input"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{background:D.surface,borderRadius:10,padding:"12px 14px",fontSize:13,color:D.textSub,lineHeight:1.7,border:`1px solid ${D.border}`}}>
+              <strong style={{color:D.text}}>Before importing:</strong> make sure your Google Sheet is shared so anyone with the link can view it.
+            </div>
+            <div><label style={S.lbl}>Google Sheet URL</label><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" style={{...S.inp,fontSize:13}}/></div>
+            <div style={{background:"#0D1828",borderRadius:8,padding:"10px 14px",fontSize:12,color:D.textSub,border:`1px solid ${D.border}`}}>
+              <strong style={{color:D.textSub}}>Supported columns:</strong> Name, Title, Coaching, Company, LinkedIn, Role / What they do, Email, Phone, WhatsApp, Notes.
+            </div>
+            {err&&<p style={{margin:0,fontSize:12,color:D.red}}>{err}</p>}
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={fetchSheet} disabled={!url.trim()} style={{...S.btn1,flex:1}}>Preview Contacts →</button>
+              <button onClick={onClose} style={S.btn2}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {step==="loading"&&(
+          <div style={{textAlign:"center",padding:"40px 20px",color:D.textMuted}}>
+            <div style={{fontSize:32,marginBottom:12,animation:"pulse 1s infinite"}}>⏳</div>
+            <p style={{fontSize:14}}>Reading your sheet…</p>
+          </div>
+        )}
+        {step==="preview"&&(
+          <>
+            <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+              <span style={{fontSize:13,color:D.green,background:"#0D2210",padding:"4px 12px",borderRadius:20,fontWeight:600}}>✓ {preview.length} ready to import</span>
+              {skipped>0&&<span style={{fontSize:13,color:D.textMuted,background:D.surface,padding:"4px 12px",borderRadius:20}}>{skipped} duplicate{skipped>1?"s":""} skipped</span>}
+            </div>
+            {preview.length===0?(
+              <div style={{textAlign:"center",padding:"30px 20px",color:D.textMuted}}>
+                <p style={{fontSize:14}}>All contacts already exist in BridgeFlow.</p>
+              </div>
+            ):(
+              <div style={{flex:1,overflowY:"auto",marginBottom:14,borderRadius:8,border:`1px solid ${D.border}`}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead>
+                    <tr style={{background:D.surface,position:"sticky",top:0}}>
+                      {["Name","Title","Coaching","LinkedIn"].map(h=>(
+                        <th key={h} style={{padding:"8px 12px",textAlign:"left",color:D.textSub,fontWeight:600,borderBottom:`1px solid ${D.border}`,whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((p,i)=>(
+                      <tr key={i} style={{borderBottom:`1px solid ${D.border+"66"}`}}>
+                        <td style={{padding:"8px 12px",color:D.text,fontWeight:500,whiteSpace:"nowrap"}}>{p.name}</td>
+                        <td style={{padding:"8px 12px",color:D.textSub,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.title||"—"}</td>
+                        <td style={{padding:"8px 12px",color:D.textSub,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.coaching||"—"}</td>
+                        <td style={{padding:"8px 12px"}}>
+                          {p.linkedin?<a href={p.linkedin.startsWith("http")?p.linkedin:`https://${p.linkedin}`} target="_blank" rel="noreferrer" style={{color:D.accent,fontSize:11}}>View</a>:<span style={{color:D.textMuted}}>—</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{display:"flex",gap:10}}>
+              {preview.length>0&&<button onClick={confirmImport} style={{...S.btn1,flex:1,background:isCold?"#1A3A50":D.yellow,color:isCold?"#7AB8D4":"#000"}}>{isCold?"❄️":"🔥"} Import {preview.length} to {label}</button>}
+              <button onClick={()=>setStep("input")} style={S.btn2}>← Back</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
 function BackHome({switchTab}){
   return(
@@ -356,6 +345,13 @@ function ColdBadge(){
   return(
     <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,background:"#141C28",color:D.coldText,fontSize:12,fontWeight:600,border:`1px solid ${D.coldBorder}`}}>
       <span style={{width:6,height:6,borderRadius:"50%",background:D.coldText,display:"inline-block"}}/>Cold
+    </span>
+  );
+}
+function WarmBadge(){
+  return(
+    <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,background:"#1A1400",color:D.warmText,fontSize:12,fontWeight:600,border:`1px solid ${D.warmBorder}`}}>
+      <span style={{width:6,height:6,borderRadius:"50%",background:D.warmText,display:"inline-block"}}/>Warm
     </span>
   );
 }
@@ -389,6 +385,8 @@ function AddEditView({form,setForm,editMode,saveContact,setView,switchTab}){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           <div><label style={S.lbl}>Name *</label><input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={S.inp} placeholder="Full name"/></div>
           <div><label style={S.lbl}>Company</label><input value={form.company} onChange={e=>setForm(f=>({...f,company:e.target.value}))} style={S.inp} placeholder="Company name"/></div>
+          <div><label style={S.lbl}>Title</label><input value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={S.inp} placeholder="e.g. Founder, Head of Marketing"/></div>
+          <div><label style={S.lbl}>Coaching Niche</label><input value={form.coaching} onChange={e=>setForm(f=>({...f,coaching:e.target.value}))} style={S.inp} placeholder="e.g. Executive Coach, Health & Wellness"/></div>
           <div><label style={S.lbl}>Email</label><input value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} style={S.inp} placeholder="email@example.com"/></div>
           <div><label style={S.lbl}>Phone</label><input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} style={S.inp} placeholder="+1 (555) 000-0000"/></div>
           <div><label style={S.lbl}>WhatsApp</label><input value={form.whatsapp} onChange={e=>setForm(f=>({...f,whatsapp:e.target.value}))} style={S.inp} placeholder="+1 (555) 000-0000"/></div>
@@ -531,7 +529,6 @@ function MeetingHistory({contactId,calLinks}){
   const[meetings,setMeetings]=useState([]);
   const[loading, setLoading] =useState(true);
   const linkedKeys=Object.entries(calLinks||{}).filter(([,cId])=>cId===contactId).map(([k])=>k);
-
   useEffect(()=>{
     if(!linkedKeys.length){setLoading(false);return;}
     const load=async()=>{
@@ -552,42 +549,25 @@ function MeetingHistory({contactId,calLinks}){
     };
     load();
   },[contactId,JSON.stringify(linkedKeys)]);
-
-  const fmtTime=ev=>{
-    const s=ev.start?.dateTime||ev.start?.date;if(!s)return"";
-    return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
-  };
-  const getDur=ev=>{
-    const s=new Date(ev.start?.dateTime||ev.start?.date);
-    const e=new Date(ev.end?.dateTime||ev.end?.date);
-    const m=Math.round((e-s)/60000);
-    if(m<60)return`${m}m`;const h=Math.floor(m/60);const mm=m%60;return mm>0?`${h}h ${mm}m`:`${h}h`;
-  };
+  const fmtTime=ev=>{const s=ev.start?.dateTime||ev.start?.date;if(!s)return"";return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});};
+  const getDur=ev=>{const s=new Date(ev.start?.dateTime||ev.start?.date);const e=new Date(ev.end?.dateTime||ev.end?.date);const m=Math.round((e-s)/60000);if(m<60)return`${m}m`;const h=Math.floor(m/60);const mm=m%60;return mm>0?`${h}h ${mm}m`:`${h}h`;};
   const isPast=ev=>new Date(ev.start?.dateTime||ev.start?.date)<new Date();
-
   if(loading) return<p style={{fontSize:13,color:D.textMuted,margin:0,animation:"pulse 1s infinite"}}>Loading meetings…</p>;
   if(!linkedKeys.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>No linked meetings yet. Go to Calendar tab and use 🔗 Link to Contact.</p>;
   if(!meetings.length) return<p style={{fontSize:13,color:D.textMuted,margin:0}}>Linked meetings not found. Try re-linking from the Calendar tab.</p>;
-
   return(
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {meetings.map((ev,i)=>{
-        const past=isPast(ev);
-        const ml=getEventMeetingLink(ev);
+        const past=isPast(ev);const ml=getEventMeetingLink(ev);
         return(
           <div key={i} style={{display:"flex",gap:12,padding:"10px 14px",borderRadius:10,background:D.surface,border:`1px solid ${past?D.border:D.accent+"44"}`}}>
             <div style={{width:3,borderRadius:2,background:past?D.border:D.accent,flexShrink:0,alignSelf:"stretch"}}/>
             <div style={{flex:1,minWidth:0}}>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
                 <span style={{fontSize:13,fontWeight:600,color:past?D.textSub:D.text}}>{ev.summary||"(No title)"}</span>
-                <span style={{fontSize:10,fontWeight:600,color:past?"#3A5A3A":"#1A3A5A",background:past?"#0D1A0D":"#0D1A2E",padding:"1px 7px",borderRadius:20,border:`1px solid ${past?"#1A3A1A":"#1A3A5A"}`}}>
-                  {past?"Past":"Upcoming"}
-                </span>
+                <span style={{fontSize:10,fontWeight:600,color:past?"#3A5A3A":"#1A3A5A",background:past?"#0D1A0D":"#0D1A2E",padding:"1px 7px",borderRadius:20,border:`1px solid ${past?"#1A3A1A":"#1A3A5A"}`}}>{past?"Past":"Upcoming"}</span>
               </div>
-              <div style={{fontSize:12,color:D.textMuted}}>
-                📅 {fmtTime(ev)} · ⏱ {getDur(ev)}
-                {ml&&<span style={{marginLeft:8}}><a href={ml.url} target="_blank" rel="noreferrer" style={{color:ml.color,textDecoration:"none",fontWeight:600}}>{ml.label}</a></span>}
-              </div>
+              <div style={{fontSize:12,color:D.textMuted}}>📅 {fmtTime(ev)} · ⏱ {getDur(ev)}{ml&&<span style={{marginLeft:8}}><a href={ml.url} target="_blank" rel="noreferrer" style={{color:ml.color,textDecoration:"none",fontWeight:600}}>{ml.label}</a></span>}</div>
             </div>
           </div>
         );
@@ -613,15 +593,17 @@ function DetailView({selected,contacts,followups,setFollowups,setContacts,setVie
           <div style={{width:54,height:54,borderRadius:"50%",background:stringToColor(contact.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff",flexShrink:0,opacity:contact.cold?0.6:1}}>{contact.name.charAt(0).toUpperCase()}</div>
           <div>
             <h2 style={{margin:0,fontSize:24,fontWeight:700,color:contact.cold?D.coldText:D.text,letterSpacing:"-0.3px"}}>{contact.name}</h2>
-            {contact.company&&<p style={{margin:"2px 0 6px",color:D.textSub,fontSize:14}}>{contact.company}</p>}
-            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            {contact.title&&<p style={{margin:"2px 0 0",color:D.textSub,fontSize:14}}>{contact.title}{contact.company?` · ${contact.company}`:""}</p>}
+            {!contact.title&&contact.company&&<p style={{margin:"2px 0 0",color:D.textSub,fontSize:14}}>{contact.company}</p>}
+            {contact.coaching&&<p style={{margin:"2px 0 0",color:D.warmText,fontSize:13}}>🎯 {contact.coaching}</p>}
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:6}}>
               {contact.cold?<ColdBadge/>:<StageBadge stage={contact.stage} showDesc/>}
               {!contact.cold&&<UrgencyBadge contact={contact}/>}
             </div>
           </div>
         </div>
         <div style={{display:"flex",gap:8}}>
-          {!contact.cold&&<button onClick={()=>{setForm({name:contact.name,company:contact.company||"",email:contact.email||"",phone:contact.phone||"",whatsapp:contact.whatsapp||"",linkedin:contact.linkedin||"",stage:contact.stage,notes:contact.notes||""});setEditMode(true);setView("add");}} style={S.btn2}>Edit</button>}
+          {!contact.cold&&<button onClick={()=>{setForm({name:contact.name,company:contact.company||"",title:contact.title||"",coaching:contact.coaching||"",email:contact.email||"",phone:contact.phone||"",whatsapp:contact.whatsapp||"",linkedin:contact.linkedin||"",stage:contact.stage,notes:contact.notes||""});setEditMode(true);setView("add");}} style={S.btn2}>Edit</button>}
           <button onClick={()=>{if(window.confirm("Delete this contact?"))deleteContact(contact.id);}} style={{...S.btn2,color:"#F87171",borderColor:"#3D1515"}}>Delete</button>
         </div>
       </div>
@@ -644,10 +626,13 @@ function DetailView({selected,contacts,followups,setFollowups,setContacts,setVie
       <div style={{...S.card}}>
         <p style={S.secH}>Contact Info</p>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 20px"}}>
-          {contact.email    &&<InfoRow label="Email"    value={contact.email}    link={`mailto:${contact.email}`}/>}
-          {contact.phone    &&<InfoRow label="Phone"    value={contact.phone}/>}
-          {contact.whatsapp &&<InfoRow label="WhatsApp" value={contact.whatsapp} link={`https://wa.me/${contact.whatsapp.replace(/\D/g,"")}`}/>}
-          {contact.linkedin &&<InfoRow label="LinkedIn" value="View Profile"     link={contact.linkedin.startsWith("http")?contact.linkedin:`https://${contact.linkedin}`}/>}
+          {contact.title    &&<InfoRow label="Title"     value={contact.title}/>}
+          {contact.coaching &&<InfoRow label="Coaching"  value={contact.coaching}/>}
+          {contact.company  &&<InfoRow label="Company"   value={contact.company}/>}
+          {contact.email    &&<InfoRow label="Email"     value={contact.email}    link={`mailto:${contact.email}`}/>}
+          {contact.phone    &&<InfoRow label="Phone"     value={contact.phone}/>}
+          {contact.whatsapp &&<InfoRow label="WhatsApp"  value={contact.whatsapp} link={`https://wa.me/${contact.whatsapp.replace(/\D/g,"")}`}/>}
+          {contact.linkedin &&<InfoRow label="LinkedIn"  value="View Profile"     link={contact.linkedin.startsWith("http")?contact.linkedin:`https://${contact.linkedin}`}/>}
           {contact.notes    &&<div style={{gridColumn:"1/-1"}}><InfoRow label="Notes" value={contact.notes}/></div>}
         </div>
       </div>
@@ -721,10 +706,123 @@ function DetailView({selected,contacts,followups,setFollowups,setContacts,setVie
   );
 }
 function SafeDetailView(props){
+  return(<ErrorBoundary onBack={()=>props.setView("contacts")}><DetailView {...props}/></ErrorBoundary>);
+}
+
+// ── WARM VIEW ─────────────────────────────────────────────────────────────────
+function WarmView({warmContacts,setWarmContacts,contacts,setContacts,switchTab,showToast}){
+  const[showImport,  setShowImport] =useState(false);
+  const[moveModal,   setMoveModal]  =useState(null); // warm contact being moved
+  const[moveStage,   setMoveStage]  =useState("Connection");
+
+  function deleteWarm(id){
+    if(window.confirm("Remove this contact from the Warm list?"))
+      setWarmContacts(w=>w.filter(x=>x.id!==id));
+  }
+
+  function moveToPipeline(){
+    if(!moveModal) return;
+    const today=todayStr();
+    const newContact=normalizeContact({
+      ...moveModal,
+      id:Date.now().toString()+Math.random().toString(36).slice(2),
+      createdAt:new Date().toISOString(),
+      conversations:[],
+      stageEnteredAt:today,
+      cadenceCompleted:[],
+      cold:false,
+      coldSince:"",coldFollowUpDate:"",
+      stage:moveStage,
+    });
+    setContacts(prev=>[newContact,...prev]);
+    setWarmContacts(w=>w.filter(x=>x.id!==moveModal.id));
+    setMoveModal(null);
+    showToast(`${moveModal.name} moved to pipeline at ${moveStage}!`);
+  }
+
   return(
-    <ErrorBoundary onBack={()=>props.setView("contacts")}>
-      <DetailView {...props}/>
-    </ErrorBoundary>
+    <div>
+      <BackHome switchTab={switchTab}/>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24}}>
+        <div>
+          <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.warmText,letterSpacing:"-0.5px"}}>🔥 Warm List</h1>
+          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{warmContacts.length} contact{warmContacts.length!==1?"s":""} · ready to move into pipeline</p>
+        </div>
+        <button onClick={()=>setShowImport(true)} style={{...S.btn1,background:"#7C3800",color:"#FDE68A"}}>📥 Import</button>
+      </div>
+      {warmContacts.length===0?(
+        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
+          <div style={{fontSize:40,marginBottom:10}}>🔥</div>
+          <p style={{fontSize:14,marginBottom:16}}>No warm contacts yet.</p>
+          <button onClick={()=>setShowImport(true)} style={S.btn1}>📥 Import from Google Sheet</button>
+        </div>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {warmContacts.map(w=>(
+            <div key={w.id} style={{background:D.card,border:`1.5px solid ${D.warmBorder}`,borderRadius:12,padding:"13px 16px",display:"flex",alignItems:"center",gap:13}}>
+              <div style={{width:40,height:40,borderRadius:"50%",background:stringToColor(w.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:700,color:"#fff"}}>{w.name.charAt(0).toUpperCase()}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:600,fontSize:15,color:D.text}}>{w.name}</span>
+                  <WarmBadge/>
+                </div>
+                <div style={{fontSize:13,color:D.textSub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {[w.title,w.coaching,w.company].filter(Boolean).join(" · ")||w.notes||""}
+                </div>
+                {w.linkedin&&<a href={w.linkedin.startsWith("http")?w.linkedin:`https://${w.linkedin}`} target="_blank" rel="noreferrer" style={{fontSize:11,color:D.accent,textDecoration:"none",marginTop:2,display:"inline-block"}}>LinkedIn →</a>}
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button onClick={()=>{setMoveModal(w);setMoveStage("Connection");}} style={{...S.btn1,fontSize:12,padding:"6px 12px"}}>Move to Pipeline</button>
+                <button onClick={()=>deleteWarm(w.id)} style={{...S.btn2,fontSize:12,padding:"5px 10px",color:"#F87171",borderColor:"#3D1515"}}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Move to Pipeline Modal */}
+      {moveModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:28,width:"100%",maxWidth:420}}>
+            <h3 style={{margin:"0 0 6px",fontSize:17,fontWeight:700,color:D.text}}>Move to Pipeline</h3>
+            <p style={{margin:"0 0 20px",fontSize:13,color:D.textSub}}>Choose which stage to add <strong style={{color:D.text}}>{moveModal.name}</strong> to.</p>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+              {STAGES.map(st=>{const m=STAGE_META[st];const sel=moveStage===st;
+                return(
+                  <button key={st} onClick={()=>setMoveStage(st)}
+                    style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:10,border:`1.5px solid ${sel?m.dot:D.border}`,background:sel?m.bg:"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                    <span style={{fontSize:18}}>{m.icon}</span>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,color:sel?m.text:D.text}}>{st}</div>
+                      <div style={{fontSize:11,color:D.textMuted}}>{m.desc}</div>
+                    </div>
+                    {sel&&<span style={{marginLeft:"auto",fontSize:11,color:m.text}}>✓ Selected</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={moveToPipeline} style={{...S.btn1,flex:1}}>Move to {moveStage}</button>
+              <button onClick={()=>setMoveModal(null)} style={S.btn2}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImport&&(
+        <ImportModal
+          contacts={contacts}
+          warmContacts={warmContacts}
+          mode="warm"
+          onImport={(newW,skipped)=>{
+            setWarmContacts(prev=>[...newW,...prev]);
+            setShowImport(false);
+            showToast(`${newW.length} contacts added to Warm list${skipped>0?`, ${skipped} duplicate${skipped>1?"s":""} skipped`:""}!`);
+          }}
+          onClose={()=>setShowImport(false)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -738,9 +836,9 @@ const CAL_COLOR_MAP={
 };
 const CAL_COLORS=["#3B82F6","#8B5CF6","#EC4899","#14B8A6","#F59E0B","#10B981","#EF4444","#6366F1"];
 const CALENDARS=[
-  {id:"e.sand@marketingeddie.com",         name:"Meeting", color:"#42d692"},
+  {id:"e.sand@marketingeddie.com",name:"Meeting",color:"#42d692"},
   {id:"c_adc72d1f80e984699226f5ab5d9626b90bf208a1d99fdfb765bd9e7592ec1338@group.calendar.google.com",name:"General",color:"#cd74e6"},
-  {id:"c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com",name:"FitPro", color:"#9fc6e7"},
+  {id:"c_e1e996c7aef87592685462e914821c014a65f6679c782ab5b9e157f8b0a425ad@group.calendar.google.com",name:"FitPro",color:"#9fc6e7"},
 ];
 function calColor(str,calId){
   if(calId&&CAL_COLOR_MAP[calId]) return CAL_COLOR_MAP[calId];
@@ -751,24 +849,20 @@ function calColor(str,calId){
 function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
   const todayDate=new Date();todayDate.setHours(0,0,0,0);
   const getWeekStart=d=>{const dt=new Date(d);dt.setHours(0,0,0,0);const day=dt.getDay();dt.setDate(dt.getDate()+(day===0?-6:1-day));return dt;};
-
-  const[weekStart,  setWeekStart] =useState(()=>getWeekStart(new Date()));
-  const[monthBase,  setMonthBase] =useState(()=>{const d=new Date();d.setDate(1);d.setHours(0,0,0,0);return d;});
-  const[events,     setEvents]    =useState([]);
-  const[loading,    setLoading]   =useState(false);
-  const[selectedEv, setSelectedEv]=useState(null);
-  const[showNew,    setShowNew]   =useState(false);
-  const[newEv,      setNewEv]     =useState(emptyNewEv());
-  const[saving,     setSaving]    =useState(false);
-  const[evErr,      setEvErr]     =useState("");
-  const[linkSearch, setLinkSearch]=useState("");
-  const[showLink,   setShowLink]  =useState(false);
+  const[weekStart,setWeekStart]=useState(()=>getWeekStart(new Date()));
+  const[monthBase,setMonthBase]=useState(()=>{const d=new Date();d.setDate(1);d.setHours(0,0,0,0);return d;});
+  const[events,setEvents]=useState([]);
+  const[loading,setLoading]=useState(false);
+  const[selectedEv,setSelectedEv]=useState(null);
+  const[showNew,setShowNew]=useState(false);
+  const[newEv,setNewEv]=useState(emptyNewEv());
+  const[saving,setSaving]=useState(false);
+  const[evErr,setEvErr]=useState("");
+  const[linkSearch,setLinkSearch]=useState("");
+  const[showLink,setShowLink]=useState(false);
   const gridRef=useRef(null);
-
   useEffect(()=>{if(gridRef.current)gridRef.current.scrollTop=8*HOUR_HEIGHT;},[]);
-
   const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d;});
-
   const fetchEvents=useCallback(async()=>{
     setLoading(true);
     try{
@@ -781,9 +875,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     }catch{setEvents([]);}
     setLoading(false);
   },[weekStart]);
-
   useEffect(()=>{fetchEvents();},[fetchEvents]);
-
   const createEvent=async(local)=>{
     if(!local.title.trim()||!local.date||!local.startTime){setEvErr("Title, date and start time are required.");return;}
     setSaving(true);setEvErr("");
@@ -797,22 +889,16 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     }catch(e){setEvErr("Could not create event: "+e.message);}
     setSaving(false);
   };
-
   const openNew=(date="",startTime="")=>{
     const endTime=startTime?(()=>{const[hh,mm]=startTime.split(":");return String((parseInt(hh)+1)%24).padStart(2,"0")+":"+mm;})():"10:00";
     setNewEv({...emptyNewEv(),date,startTime,endTime});setEvErr("");setShowNew(true);
   };
-
   const prevWeek=()=>{const d=new Date(weekStart);d.setDate(d.getDate()-7);setWeekStart(d);};
   const nextWeek=()=>{const d=new Date(weekStart);d.setDate(d.getDate()+7);setWeekStart(d);};
-  const goToday =()=>{setWeekStart(getWeekStart(new Date()));const d=new Date();d.setDate(1);d.setHours(0,0,0,0);setMonthBase(d);};
-
+  const goToday=()=>{setWeekStart(getWeekStart(new Date()));const d=new Date();d.setDate(1);d.setHours(0,0,0,0);setMonthBase(d);};
   const eventsForDay=day=>{
     const ds=day.toISOString().split("T")[0];
-    return events.filter(ev=>{
-      const raw=ev.start?.dateTime||ev.start?.date||"";
-      return new Date(raw).toLocaleDateString("en-CA",{timeZone:"America/New_York"})===ds;
-    });
+    return events.filter(ev=>{const raw=ev.start?.dateTime||ev.start?.date||"";return new Date(raw).toLocaleDateString("en-CA",{timeZone:"America/New_York"})===ds;});
   };
   const evStyle=(ev,index,total)=>{
     const s=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
@@ -846,9 +932,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
         <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
           {cells.map((d,i)=>(
             <div key={i} onClick={()=>{if(!d)return;setWeekStart(getWeekStart(new Date(yr,mo,d)));}}
-              style={{textAlign:"center",fontSize:11,padding:"3px 0",borderRadius:4,cursor:d?"pointer":"default",
-                background:inWeek(d)?"#1A2D4A":"transparent",color:isTd(d)?D.accent:d?D.text:D.textMuted,
-                fontWeight:isTd(d)?700:400,outline:isTd(d)?`1.5px solid ${D.accent}`:"none"}}>
+              style={{textAlign:"center",fontSize:11,padding:"3px 0",borderRadius:4,cursor:d?"pointer":"default",background:inWeek(d)?"#1A2D4A":"transparent",color:isTd(d)?D.accent:d?D.text:D.textMuted,fontWeight:isTd(d)?700:400,outline:isTd(d)?`1.5px solid ${D.accent}`:"none"}}>
               {d||""}
             </div>
           ))}
@@ -878,63 +962,30 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
 
   const EventPopup=()=>{
     if(!selectedEv) return null;
-    const ev=selectedEv;
-    const evKey=makeEvKey(ev);
-    const linkedId=calLinks[evKey];
+    const ev=selectedEv;const evKey=makeEvKey(ev);const linkedId=calLinks[evKey];
     const linked=linkedId?contacts.find(c=>c.id===linkedId):null;
-    const color=calColor(ev.summary||"event",ev.calendarId);
-    const ml=getEventMeetingLink(ev);
-    const getDur=()=>{
-      if(!ev.start?.dateTime||!ev.end?.dateTime) return null;
-      const mins=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000);
-      const h=Math.floor(mins/60);const m=mins%60;
-      return h>0?(m>0?`${h}h ${m}m`:`${h}h`):`${m}m`;
-    };
+    const color=calColor(ev.summary||"event",ev.calendarId);const ml=getEventMeetingLink(ev);
+    const getDur=()=>{if(!ev.start?.dateTime||!ev.end?.dateTime)return null;const mins=Math.round((new Date(ev.end.dateTime)-new Date(ev.start.dateTime))/60000);const h=Math.floor(mins/60);const m=mins%60;return h>0?(m>0?`${h}h ${m}m`:`${h}h`):`${m}m`;};
     return(
       <div style={{position:"fixed",bottom:24,right:24,width:300,background:D.card,border:`1.5px solid ${color}55`,borderRadius:14,padding:18,zIndex:50,boxShadow:"0 8px 32px rgba(0,0,0,0.5)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
           <div style={{flex:1,paddingRight:8}}>
-            {ev.calendarName&&(
-              <div style={{display:"inline-flex",alignItems:"center",gap:4,marginBottom:6,padding:"2px 8px",borderRadius:20,background:color+"22",border:`1px solid ${color}44`}}>
-                <span style={{width:7,height:7,borderRadius:"50%",background:color,display:"inline-block"}}/>
-                <span style={{fontSize:10,fontWeight:600,color}}>{ev.calendarName}</span>
-              </div>
-            )}
+            {ev.calendarName&&(<div style={{display:"inline-flex",alignItems:"center",gap:4,marginBottom:6,padding:"2px 8px",borderRadius:20,background:color+"22",border:`1px solid ${color}44`}}><span style={{width:7,height:7,borderRadius:"50%",background:color,display:"inline-block"}}/><span style={{fontSize:10,fontWeight:600,color}}>{ev.calendarName}</span></div>)}
             <div style={{fontSize:15,fontWeight:700,color:D.text,marginBottom:8,lineHeight:1.4}}>{ev.summary||"(No title)"}</div>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
               <span style={{fontSize:13,color:D.textSub}}>🕐</span>
-              <span style={{fontSize:13,color:D.text,fontWeight:500}}>
-                {fmtTime(ev.start?.dateTime)}
-                {ev.end?.dateTime&&<span style={{color:D.textSub}}> – {fmtTime(ev.end.dateTime)}</span>}
-              </span>
+              <span style={{fontSize:13,color:D.text,fontWeight:500}}>{fmtTime(ev.start?.dateTime)}{ev.end?.dateTime&&<span style={{color:D.textSub}}> – {fmtTime(ev.end.dateTime)}</span>}</span>
               {getDur()&&<span style={{fontSize:11,color:D.textMuted,background:D.surface,padding:"1px 7px",borderRadius:20,border:`1px solid ${D.border}`}}>{getDur()}</span>}
             </div>
-            {ml&&(
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                <span style={{fontSize:13,color:D.textSub,flexShrink:0}}>
-                  {ml.label.includes("Zoom")?"🎥":"📹"}
-                </span>
-                <a href={ml.url} target="_blank" rel="noreferrer"
-                  style={{fontSize:13,fontWeight:600,textDecoration:"none",color:ml.color}}>
-                  {ml.label}
-                </a>
-              </div>
-            )}
-            {ev.numAttendees>0&&(
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-                <span style={{fontSize:13,color:D.textSub}}>👥</span>
-                <span style={{fontSize:13,color:D.textSub}}>{ev.numAttendees} attendee{ev.numAttendees>1?"s":""}</span>
-              </div>
-            )}
+            {ml&&(<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}><span style={{fontSize:13,color:D.textSub,flexShrink:0}}>{ml.label.includes("Zoom")?"🎥":"📹"}</span><a href={ml.url} target="_blank" rel="noreferrer" style={{fontSize:13,fontWeight:600,textDecoration:"none",color:ml.color}}>{ml.label}</a></div>)}
+            {ev.numAttendees>0&&(<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}><span style={{fontSize:13,color:D.textSub}}>👥</span><span style={{fontSize:13,color:D.textSub}}>{ev.numAttendees} attendee{ev.numAttendees>1?"s":""}</span></div>)}
           </div>
           <button onClick={()=>{setSelectedEv(null);setShowLink(false);}} style={{background:"none",border:"none",color:D.textMuted,cursor:"pointer",fontSize:20,lineHeight:1,padding:0,flexShrink:0}}>×</button>
         </div>
         {linked?(
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,background:"#0D1828",border:`1px solid ${D.accent}44`,marginBottom:10}}>
             <div style={{width:24,height:24,borderRadius:"50%",background:stringToColor(linked.name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff",flexShrink:0}}>{linked.name.charAt(0).toUpperCase()}</div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:12,fontWeight:600,color:D.text}}>{linked.name}</div>
-            </div>
+            <div style={{flex:1}}><div style={{fontSize:12,fontWeight:600,color:D.text}}>{linked.name}</div></div>
             <button onClick={()=>setCalLinks(p=>{const n={...p};delete n[evKey];return n;})} style={{background:"none",border:"none",cursor:"pointer",color:D.textMuted,fontSize:14,padding:0}}>×</button>
           </div>
         ):(
@@ -942,8 +993,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
         )}
         {showLink&&(
           <div style={{background:D.surface,borderRadius:8,border:`1px solid ${D.border}`,overflow:"hidden",marginBottom:10}}>
-            <input autoFocus value={linkSearch} onChange={e=>setLinkSearch(e.target.value)} placeholder="Search contacts…"
-              style={{...S.inp,padding:"6px 10px",fontSize:12,borderRadius:0,border:"none",borderBottom:`1px solid ${D.border}`}}/>
+            <input autoFocus value={linkSearch} onChange={e=>setLinkSearch(e.target.value)} placeholder="Search contacts…" style={{...S.inp,padding:"6px 10px",fontSize:12,borderRadius:0,border:"none",borderBottom:`1px solid ${D.border}`}}/>
             <div style={{maxHeight:150,overflowY:"auto"}}>
               {contacts.filter(c=>!c.cold&&(c.name.toLowerCase().includes(linkSearch.toLowerCase())||(c.company||"").toLowerCase().includes(linkSearch.toLowerCase()))).map(c=>(
                 <div key={c.id} onClick={()=>{setCalLinks(p=>({...p,[evKey]:c.id}));setShowLink(false);setLinkSearch("");}}
@@ -970,8 +1020,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
     const[local,setLocal]=useState(newEv);
     const upd=k=>e=>setLocal(p=>({...p,[k]:e.target.value}));
     return(
-      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
-        onClick={e=>{if(e.target===e.currentTarget){setShowNew(false);setEvErr("");}}}>
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={e=>{if(e.target===e.currentTarget){setShowNew(false);setEvErr("");}}}>
         <div style={{background:D.card,border:`1.5px solid ${D.border}`,borderRadius:16,padding:24,width:"100%",maxWidth:420}} onClick={e=>e.stopPropagation()}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
             <h3 style={{margin:0,fontSize:17,fontWeight:700,color:D.text}}>New Event</h3>
@@ -982,16 +1031,12 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
             <div>
               <label style={S.lbl}>Calendar</label>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {CALENDARS.map(cal=>{
-                  const sel=local.calendarId===cal.id;
-                  return(
-                    <button key={cal.id} onClick={()=>setLocal(p=>({...p,calendarId:cal.id}))}
-                      style={{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${sel?cal.color:D.border}`,background:sel?cal.color+"33":"transparent",color:sel?cal.color:D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:sel?600:400,display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{width:8,height:8,borderRadius:"50%",background:cal.color,display:"inline-block",flexShrink:0}}/>
-                      {cal.name}
-                    </button>
-                  );
-                })}
+                {CALENDARS.map(cal=>{const sel=local.calendarId===cal.id;return(
+                  <button key={cal.id} onClick={()=>setLocal(p=>({...p,calendarId:cal.id}))}
+                    style={{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${sel?cal.color:D.border}`,background:sel?cal.color+"33":"transparent",color:sel?cal.color:D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:sel?600:400,display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{width:8,height:8,borderRadius:"50%",background:cal.color,display:"inline-block",flexShrink:0}}/>{cal.name}
+                  </button>
+                );})}
               </div>
             </div>
             <div><label style={S.lbl}>Date *</label><input type="date" value={local.date} onChange={upd("date")} style={{...S.inp,colorScheme:"dark"}}/></div>
@@ -999,14 +1044,8 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
               <div><label style={S.lbl}>Start Time *</label><input type="time" value={local.startTime} onChange={upd("startTime")} style={{...S.inp,colorScheme:"dark"}}/></div>
               <div><label style={S.lbl}>End Time</label><input type="time" value={local.endTime} onChange={upd("endTime")} style={{...S.inp,colorScheme:"dark"}}/></div>
             </div>
-            <div>
-              <label style={S.lbl}>Invitees <span style={{color:D.textMuted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label>
-              <input value={local.invitees} onChange={upd("invitees")} placeholder="email1@example.com, email2@example.com" style={S.inp} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}/>
-            </div>
-            <div>
-              <label style={S.lbl}>Meeting Link <span style={{color:D.textMuted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label>
-              <input value={local.link} onChange={upd("link")} placeholder="https://meet.google.com/… or leave blank" style={S.inp}/>
-            </div>
+            <div><label style={S.lbl}>Invitees <span style={{color:D.textMuted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label><input value={local.invitees} onChange={upd("invitees")} placeholder="email1@example.com, email2@example.com" style={S.inp} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}/></div>
+            <div><label style={S.lbl}>Meeting Link <span style={{color:D.textMuted,fontWeight:400,textTransform:"none",letterSpacing:0}}>(optional)</span></label><input value={local.link} onChange={upd("link")} placeholder="https://meet.google.com/… or leave blank" style={S.inp}/></div>
             {evErr&&<p style={{fontSize:12,color:D.red,margin:0}}>{evErr}</p>}
             <div style={{display:"flex",gap:10,marginTop:4}}>
               <button onClick={()=>createEvent(local)} disabled={saving} style={{...S.btn1,flex:1}}>{saving?"Creating…":"Create Event"}</button>
@@ -1030,7 +1069,7 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
         </div>
         <div style={{display:"flex",gap:6}}>
           <button onClick={()=>openNew(todayStr(),"09:00")} style={{...S.btn1,fontSize:12,padding:"6px 14px"}}>+ New Event</button>
-          <button onClick={goToday}  style={{...S.btnSm,fontSize:12}}>Today</button>
+          <button onClick={goToday} style={{...S.btnSm,fontSize:12}}>Today</button>
           <button onClick={prevWeek} style={{...S.btnSm,fontSize:14,padding:"5px 10px"}}>‹</button>
           <button onClick={nextWeek} style={{...S.btnSm,fontSize:14,padding:"5px 10px"}}>›</button>
           <button onClick={fetchEvents} style={{...S.btnSm,fontSize:12}} disabled={loading}>⟳</button>
@@ -1041,15 +1080,12 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
         <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
           <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)",borderBottom:`1px solid ${D.border}`,flexShrink:0}}>
             <div/>
-            {weekDays.map((d,i)=>{
-              const isTd=d.getTime()===todayDate.getTime();
-              return(
-                <div key={i} style={{textAlign:"center",padding:"6px 4px",borderLeft:`1px solid ${D.border}`}}>
-                  <div style={{fontSize:11,color:D.textMuted,fontWeight:500}}>{d.toLocaleDateString("en-US",{weekday:"short"}).toUpperCase()}</div>
-                  <div style={{width:26,height:26,borderRadius:"50%",background:isTd?D.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",margin:"2px auto 0",fontSize:13,fontWeight:isTd?700:400,color:isTd?"#fff":D.text}}>{d.getDate()}</div>
-                </div>
-              );
-            })}
+            {weekDays.map((d,i)=>{const isTd=d.getTime()===todayDate.getTime();return(
+              <div key={i} style={{textAlign:"center",padding:"6px 4px",borderLeft:`1px solid ${D.border}`}}>
+                <div style={{fontSize:11,color:D.textMuted,fontWeight:500}}>{d.toLocaleDateString("en-US",{weekday:"short"}).toUpperCase()}</div>
+                <div style={{width:26,height:26,borderRadius:"50%",background:isTd?D.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",margin:"2px auto 0",fontSize:13,fontWeight:isTd?700:400,color:isTd?"#fff":D.text}}>{d.getDate()}</div>
+              </div>
+            );})}
           </div>
           <div ref={gridRef} style={{flex:1,overflowY:"auto"}}>
             <div style={{display:"grid",gridTemplateColumns:"44px repeat(7,1fr)"}}>
@@ -1057,25 +1093,16 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
                 <React.Fragment key={h}>
                   <div style={{height:HOUR_HEIGHT,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:8,paddingTop:2,fontSize:10,color:D.textMuted,flexShrink:0}}>{h>0?fmtHour(h):""}</div>
                   {weekDays.map((d,di)=>{
-                    const isTd=d.getTime()===todayDate.getTime();
-                    const ds=d.toISOString().split("T")[0];
+                    const isTd=d.getTime()===todayDate.getTime();const ds=d.toISOString().split("T")[0];
                     return(
-                      <div key={di}
-                        style={{height:HOUR_HEIGHT,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}}
-                        onDoubleClick={()=>openNew(ds,String(h).padStart(2,"0")+":00")}>
+                      <div key={di} style={{height:HOUR_HEIGHT,borderLeft:`1px solid ${D.border}`,borderTop:`1px solid ${h===0?"transparent":D.border+"44"}`,position:"relative",background:isTd?"#0D1828":"transparent",cursor:"pointer"}} onDoubleClick={()=>openNew(ds,String(h).padStart(2,"0")+":00")}>
                         {(()=>{
-                          const dayEvs=eventsForDay(d).filter(ev=>{
-                            const dt=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));
-                            return dt.getHours()===h;
-                          });
+                          const dayEvs=eventsForDay(d).filter(ev=>{const dt=new Date(new Date(ev.start?.dateTime||ev.start?.date).toLocaleString("en-US",{timeZone:"America/New_York"}));return dt.getHours()===h;});
                           return dayEvs.map((ev,ei)=>{
                             const{top,height,color,width,left}=evStyle(ev,ei,dayEvs.length);
-                            const evKey=makeEvKey(ev);
-                            const linked=calLinks[evKey]?contacts.find(c=>c.id===calLinks[evKey]):null;
-                            const ml=getEventMeetingLink(ev);
+                            const evKey=makeEvKey(ev);const linked=calLinks[evKey]?contacts.find(c=>c.id===calLinks[evKey]):null;const ml=getEventMeetingLink(ev);
                             return(
-                              <div key={ei}
-                                onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
+                              <div key={ei} onClick={e=>{e.stopPropagation();setSelectedEv(ev===selectedEv?null:ev);}}
                                 style={{position:"absolute",left,width,top:top-(h*HOUR_HEIGHT),height,background:color+"22",border:`1.5px solid ${color}`,borderRadius:6,overflow:"hidden",cursor:"pointer",zIndex:2,padding:"4px 6px",boxSizing:"border-box"}}>
                                 <div style={{fontSize:11,fontWeight:700,color,lineHeight:1.3,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.summary||"(No title)"}</div>
                                 <div style={{fontSize:10,color:color+"cc",lineHeight:1.3,whiteSpace:"nowrap",overflow:"hidden"}}>{fmtTime(ev.start?.dateTime)}{ev.end?.dateTime?` – ${fmtTime(ev.end.dateTime)}`:""}</div>
@@ -1101,17 +1128,15 @@ function CalendarView({contacts,switchTab,calLinks,setCalLinks}){
 }
 
 // ── HOME VIEW ─────────────────────────────────────────────────────────────────
-function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
+function HomeView({contacts,followups,warmContacts,switchTab,setFilterStage,onAddContact}){
   const activeContacts=contacts.filter(c=>!c.cold);
   const coldContacts=contacts.filter(c=>c.cold);
   const[upcomingEvs,setUpcomingEvs]=useState([]);
-  const[loadingEvs, setLoadingEvs]=useState(true);
-
+  const[loadingEvs,setLoadingEvs]=useState(true);
   const urgentCount=activeContacts.filter(c=>{const u=getUrgency(c);return u&&(u.level==="overdue"||u.level==="today");}).length
     +followups.filter(f=>{if(f.done||!f.date)return false;const u=getDateUrgency(f.date);return u.level==="overdue"||u.level==="today";}).length;
   const coldDueCount=coldContacts.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)<=0).length;
   const stageCounts=STAGES.reduce((a,s)=>({...a,[s]:activeContacts.filter(c=>c.stage===s).length}),{});
-
   useEffect(()=>{
     const load=async()=>{
       setLoadingEvs(true);
@@ -1127,26 +1152,19 @@ function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
     };
     load();
   },[]);
-
-  const fmtEvTime=ev=>{
-    const s=ev.start?.dateTime||ev.start?.date;if(!s)return"";
-    return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});
-  };
-
+  const fmtEvTime=ev=>{const s=ev.start?.dateTime||ev.start?.date;if(!s)return"";return new Date(s).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",hour12:true,timeZone:"America/New_York"});};
   return(
     <div>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24}}>
         <div>
           <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.text,letterSpacing:"-0.5px"}}>👋 Welcome back</h1>
-          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>
-            {urgentCount>0?`You have ${urgentCount} urgent follow-up${urgentCount>1?"s":""} today`:"You're all caught up today 🎉"}
-          </p>
+          <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{urgentCount>0?`You have ${urgentCount} urgent follow-up${urgentCount>1?"s":""} today`:"You're all caught up today 🎉"}</p>
         </div>
         <button onClick={onAddContact} style={S.btn1}>+ Add Contact</button>
       </div>
       <div style={{...S.card}}>
         <p style={{margin:"0 0 12px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Your Pipeline</p>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:12}}>
           <button onClick={()=>switchTab("contacts")} style={{background:"#0D1828",border:`1.5px solid #2E4060`,borderRadius:8,padding:"12px 8px",cursor:"pointer",textAlign:"center"}}>
             <div style={{fontSize:20,marginBottom:4}}>👥</div>
             <div style={{fontSize:10,fontWeight:600,color:D.textSub}}>Contacts</div>
@@ -1158,6 +1176,11 @@ function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
             <div style={{fontSize:26,fontWeight:700,color:urgentCount>0?D.red:D.text,lineHeight:1.3,marginTop:2}}>{urgentCount}</div>
             {urgentCount>0&&<div style={{fontSize:9,color:D.red,marginTop:1}}>urgent</div>}
           </button>
+          <button onClick={()=>switchTab("warm")} style={{background:"#1A1000",border:`1.5px solid ${D.warmBorder}`,borderRadius:8,padding:"12px 8px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:20,marginBottom:4}}>🔥</div>
+            <div style={{fontSize:10,fontWeight:600,color:D.warmText}}>Warm</div>
+            <div style={{fontSize:26,fontWeight:700,color:D.warmText,lineHeight:1.3,marginTop:2}}>{warmContacts.length}</div>
+          </button>
           <button onClick={()=>switchTab("cold")} style={{background:coldDueCount>0?"#0A1018":"#0D1828",border:`1.5px solid ${coldDueCount>0?"#2A5A78":"#2E4060"}`,borderRadius:8,padding:"12px 8px",cursor:"pointer",textAlign:"center"}}>
             <div style={{fontSize:20,marginBottom:4}}>❄️</div>
             <div style={{fontSize:10,fontWeight:600,color:coldDueCount>0?"#7AB8D4":D.textSub}}>Cold</div>
@@ -1168,20 +1191,17 @@ function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
         <div style={{height:1,background:D.border,marginBottom:12}}/>
         <p style={{margin:"0 0 10px",fontSize:11,color:D.textSub,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>Stages</p>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
-          {STAGES.map((st,i)=>{
-            const m=STAGE_META[st];
-            return(
-              <button key={st} onClick={()=>{setFilterStage(st);switchTab("contacts");}}
-                style={{position:"relative",background:"transparent",border:`1.5px solid ${D.border}`,borderRadius:8,padding:"10px 6px",cursor:"pointer",textAlign:"center"}}
-                onMouseEnter={e=>{e.currentTarget.style.background=m.bg;e.currentTarget.style.borderColor=m.dot;}}
-                onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor=D.border;}}>
-                {i<STAGES.length-1&&<div style={{position:"absolute",right:-7,top:"50%",transform:"translateY(-50%)",color:D.textMuted,fontSize:14,zIndex:1,pointerEvents:"none"}}>›</div>}
-                <div style={{fontSize:18,marginBottom:4}}>{m.icon}</div>
-                <div style={{fontSize:10,fontWeight:600,color:D.textSub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{st}</div>
-                <div style={{fontSize:22,fontWeight:700,color:D.text,lineHeight:1.3,marginTop:2}}>{stageCounts[st]}</div>
-              </button>
-            );
-          })}
+          {STAGES.map((st,i)=>{const m=STAGE_META[st];return(
+            <button key={st} onClick={()=>{setFilterStage(st);switchTab("contacts");}}
+              style={{position:"relative",background:"transparent",border:`1.5px solid ${D.border}`,borderRadius:8,padding:"10px 6px",cursor:"pointer",textAlign:"center"}}
+              onMouseEnter={e=>{e.currentTarget.style.background=m.bg;e.currentTarget.style.borderColor=m.dot;}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor=D.border;}}>
+              {i<STAGES.length-1&&<div style={{position:"absolute",right:-7,top:"50%",transform:"translateY(-50%)",color:D.textMuted,fontSize:14,zIndex:1,pointerEvents:"none"}}>›</div>}
+              <div style={{fontSize:18,marginBottom:4}}>{m.icon}</div>
+              <div style={{fontSize:10,fontWeight:600,color:D.textSub,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{st}</div>
+              <div style={{fontSize:22,fontWeight:700,color:D.text,lineHeight:1.3,marginTop:2}}>{stageCounts[st]}</div>
+            </button>
+          );})}
         </div>
       </div>
       <div style={{...S.card}}>
@@ -1193,18 +1213,15 @@ function HomeView({contacts,followups,switchTab,setFilterStage,onAddContact}){
         {!loadingEvs&&upcomingEvs.length===0&&<p style={{fontSize:13,color:D.textMuted,margin:0}}>No upcoming events in the next 7 days.</p>}
         {!loadingEvs&&upcomingEvs.length>0&&(
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {upcomingEvs.map((ev,i)=>{
-              const color=calColor(ev.summary||"event",ev.calendarId);
-              return(
-                <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:D.surface,border:`1px solid ${D.border}`}}>
-                  <div style={{width:3,height:36,borderRadius:2,background:color,flexShrink:0}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.summary||"(No title)"}</div>
-                    <div style={{fontSize:11,color:D.textMuted,marginTop:2}}>{fmtEvTime(ev)}</div>
-                  </div>
+            {upcomingEvs.map((ev,i)=>{const color=calColor(ev.summary||"event",ev.calendarId);return(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:D.surface,border:`1px solid ${D.border}`}}>
+                <div style={{width:3,height:36,borderRadius:2,background:color,flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.summary||"(No title)"}</div>
+                  <div style={{fontSize:11,color:D.textMuted,marginTop:2}}>{fmtEvTime(ev)}</div>
                 </div>
-              );
-            })}
+              </div>
+            );})}
           </div>
         )}
       </div>
@@ -1219,23 +1236,15 @@ function ColdView({contacts,setSelected,setView,switchTab}){
   const upcoming=cold.filter(c=>c.coldFollowUpDate&&daysBetween(c.coldFollowUpDate)>0).sort((a,b)=>daysBetween(a.coldFollowUpDate)-daysBetween(b.coldFollowUpDate));
   const noDate=cold.filter(c=>!c.coldFollowUpDate);
   const ColdCard=({c})=>{
-    const diff=c.coldFollowUpDate?daysBetween(c.coldFollowUpDate):null;
-    const isdue=diff!==null&&diff<=0;
+    const diff=c.coldFollowUpDate?daysBetween(c.coldFollowUpDate):null;const isdue=diff!==null&&diff<=0;
     return(
-      <div onClick={()=>{setSelected(c);setView("detail");}}
-        style={{background:"#0A1018",border:`1.5px solid ${isdue?"#2A5A78":D.coldBorder}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13,marginBottom:6}}>
+      <div onClick={()=>{setSelected(c);setView("detail");}} style={{background:"#0A1018",border:`1.5px solid ${isdue?"#2A5A78":D.coldBorder}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13,marginBottom:6}}>
         <div style={{width:40,height:40,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:700,color:"#fff",opacity:0.7}}>{c.name.charAt(0).toUpperCase()}</div>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <span style={{fontWeight:600,fontSize:14,color:D.coldText}}>{c.name}</span><ColdBadge/>
-          </div>
-          <div style={{fontSize:12,color:D.textMuted,marginTop:3}}>{c.company&&<span>{c.company} · </span>}Cold since {formatDate(c.coldSince)}</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:14,color:D.coldText}}>{c.name}</span><ColdBadge/></div>
+          <div style={{fontSize:12,color:D.textMuted,marginTop:3}}>{[c.title,c.company].filter(Boolean).join(" · ")||""}{(c.title||c.company)?" · ":""}{`Cold since ${formatDate(c.coldSince)}`}</div>
         </div>
-        {c.coldFollowUpDate&&(
-          <span style={{fontSize:11,fontWeight:600,color:isdue?"#7AB8D4":D.textMuted,background:isdue?"#0D1E2E":"transparent",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap",border:isdue?"1px solid #1A3A50":"none"}}>
-            {isdue?(diff===0?"Check-in today":`Check-in ${Math.abs(diff)}d ago`):`Check-in in ${diff}d`}
-          </span>
-        )}
+        {c.coldFollowUpDate&&(<span style={{fontSize:11,fontWeight:600,color:isdue?"#7AB8D4":D.textMuted,background:isdue?"#0D1E2E":"transparent",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap",border:isdue?"1px solid #1A3A50":"none"}}>{isdue?(diff===0?"Check-in today":`Check-in ${Math.abs(diff)}d ago`):`Check-in in ${diff}d`}</span>)}
       </div>
     );
   };
@@ -1246,12 +1255,7 @@ function ColdView({contacts,setSelected,setView,switchTab}){
         <h1 style={{margin:0,fontSize:28,fontWeight:700,color:D.coldText,letterSpacing:"-0.5px"}}>❄️ Cold Check-ins</h1>
         <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{due.length} due now · {upcoming.length} upcoming · {cold.length} total</p>
       </div>
-      {cold.length===0?(
-        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
-          <div style={{fontSize:40,marginBottom:10}}>❄️</div>
-          <p style={{fontSize:14}}>No cold contacts yet.</p>
-        </div>
-      ):(
+      {cold.length===0?(<div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}><div style={{fontSize:40,marginBottom:10}}>❄️</div><p style={{fontSize:14}}>No cold contacts yet.</p></div>):(
         <>
           {due.length>0&&<div style={{marginBottom:24}}><p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:"#7AB8D4",textTransform:"uppercase",letterSpacing:0.8}}>Due for Check-in · {due.length}</p>{due.map(c=><ColdCard key={c.id} c={c}/>)}</div>}
           {upcoming.length>0&&<div style={{marginBottom:24}}><p style={{margin:"0 0 10px",fontSize:12,fontWeight:700,color:D.textSub,textTransform:"uppercase",letterSpacing:0.8}}>Upcoming · {upcoming.length}</p>{upcoming.map(c=><ColdCard key={c.id} c={c}/>)}</div>}
@@ -1316,12 +1320,7 @@ function Dashboard({contacts,followups,setSelected,setView,onAddContact,switchTa
         </div>
         <button onClick={onAddContact} style={S.btn1}>+ Add Contact</button>
       </div>
-      {!allItems.length?(
-        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
-          <div style={{fontSize:40,marginBottom:10}}>✅</div>
-          <p style={{fontSize:14}}>No follow-ups yet.</p>
-        </div>
-      ):(
+      {!allItems.length?(<div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}><div style={{fontSize:40,marginBottom:10}}>✅</div><p style={{fontSize:14}}>No follow-ups yet.</p></div>):(
         <>
           <Section title="Overdue"   color={D.red}     items={overdue}/>
           <Section title="Due Today" color="#F97316"   items={today}/>
@@ -1338,13 +1337,7 @@ class ErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={error:null};}
   static getDerivedStateFromError(e){return{error:e};}
   render(){
-    if(this.state.error)return(
-      <div style={{padding:30,color:"#F87171"}}>
-        <p style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong.</p>
-        <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8}}>{this.state.error?.message}</pre>
-        <button onClick={()=>this.props.onBack()} style={{marginTop:14,background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>← Go Back</button>
-      </div>
-    );
+    if(this.state.error)return(<div style={{padding:30,color:"#F87171"}}><p style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong.</p><pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8}}>{this.state.error?.message}</pre><button onClick={()=>this.props.onBack()} style={{marginTop:14,background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>← Go Back</button></div>);
     return this.props.children;
   }
 }
@@ -1352,16 +1345,7 @@ class RootErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={error:null};}
   static getDerivedStateFromError(e){return{error:e};}
   render(){
-    if(this.state.error)return(
-      <div style={{minHeight:"100vh",background:"#080C14",display:"flex",alignItems:"center",justifyContent:"center",padding:30,fontFamily:"'DM Sans',sans-serif"}}>
-        <div style={{maxWidth:540,width:"100%"}}>
-          <p style={{color:"#F87171",fontWeight:700,fontSize:18,marginBottom:10}}>BridgeFlow ran into a problem</p>
-          <pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8,marginBottom:16}}>{this.state.error?.message}</pre>
-          <button onClick={()=>{localStorage.removeItem("bf-contacts-v3");localStorage.removeItem("bf-followups-v3");window.location.reload();}} style={{background:"#EF4444",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit",marginRight:10}}>Clear local data &amp; reload</button>
-          <button onClick={()=>window.location.reload()} style={{background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>Reload</button>
-        </div>
-      </div>
-    );
+    if(this.state.error)return(<div style={{minHeight:"100vh",background:"#080C14",display:"flex",alignItems:"center",justifyContent:"center",padding:30,fontFamily:"'DM Sans',sans-serif"}}><div style={{maxWidth:540,width:"100%"}}><p style={{color:"#F87171",fontWeight:700,fontSize:18,marginBottom:10}}>BridgeFlow ran into a problem</p><pre style={{fontSize:11,color:"#6B82A0",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#111827",padding:14,borderRadius:8,marginBottom:16}}>{this.state.error?.message}</pre><button onClick={()=>{localStorage.removeItem("bf-contacts-v3");localStorage.removeItem("bf-followups-v3");window.location.reload();}} style={{background:"#EF4444",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit",marginRight:10}}>Clear local data &amp; reload</button><button onClick={()=>window.location.reload()} style={{background:"#3B82F6",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>Reload</button></div></div>);
     return this.props.children;
   }
 }
@@ -1370,6 +1354,7 @@ class RootErrorBoundary extends React.Component{
 function App(){
   const[contacts,    setContacts]    = useState([]);
   const[followups,   setFollowups]   = useState([]);
+  const[warmContacts,setWarmContacts]= useState(()=>{try{return JSON.parse(localStorage.getItem(WARM_KEY)||"[]").map(normalizeWarm);}catch{return[];}});
   const[calLinks,    setCalLinks]    = useState(()=>{try{return JSON.parse(localStorage.getItem(CAL_LINKS_KEY)||"{}");}catch{return{};}});
   const[view,        setView]        = useState("home");
   const[tab,         setTab]         = useState("home");
@@ -1411,6 +1396,7 @@ function App(){
   useEffect(()=>{localStorage.setItem(STORAGE_KEY,JSON.stringify(contacts));},[contacts]);
   useEffect(()=>{localStorage.setItem(FOLLOWUP_KEY,JSON.stringify(followups));},[followups]);
   useEffect(()=>{localStorage.setItem(CAL_LINKS_KEY,JSON.stringify(calLinks));},[calLinks]);
+  useEffect(()=>{localStorage.setItem(WARM_KEY,JSON.stringify(warmContacts));},[warmContacts]);
 
   const scheduleSync=useCallback((c,f)=>{
     clearTimeout(syncTimer.current);setSyncState("syncing");
@@ -1428,14 +1414,14 @@ function App(){
 
   const showToast=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
   const exportBackup=()=>{
-    const blob=new Blob([JSON.stringify({contacts,followups,exportedAt:new Date().toISOString()},null,2)],{type:"application/json"});
+    const blob=new Blob([JSON.stringify({contacts,followups,warmContacts,exportedAt:new Date().toISOString()},null,2)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`bridgeflow-${todayStr()}.json`;a.click();
     showToast("Backup downloaded!");
   };
   const importBackup=e=>{
     const file=e.target.files[0];if(!file)return;
     const r=new FileReader();
-    r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!Array.isArray(d.contacts))throw new Error();setContacts(d.contacts);setFollowups(d.followups||[]);showToast(`Restored ${d.contacts.length} contacts!`);}catch{showToast("Invalid backup file","err");}};
+    r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!Array.isArray(d.contacts))throw new Error();setContacts(d.contacts);setFollowups(d.followups||[]);setWarmContacts((d.warmContacts||[]).map(normalizeWarm));showToast(`Restored ${d.contacts.length} contacts!`);}catch{showToast("Invalid backup file","err");}};
     r.readAsText(file);e.target.value="";
   };
 
@@ -1485,7 +1471,6 @@ function App(){
     return(!q||c.name.toLowerCase().includes(q)||(c.company||"").toLowerCase().includes(q)||(c.email||"").toLowerCase().includes(q))
       &&(filterStage==="All"||c.stage===filterStage);
   });
-  const stageCounts=STAGES.reduce((a,s)=>({...a,[s]:activeContacts.filter(c=>c.stage===s).length}),{});
   const switchTab=t=>{setTab(t);setView(t);};
   const addContactAction=()=>{setForm(emptyContact);setEditMode(false);setView("add");};
 
@@ -1501,11 +1486,11 @@ function App(){
       <div style={{background:D.surface,borderBottom:`1px solid ${D.border}`,padding:"0 20px",display:"flex",alignItems:"center",height:52,gap:12}}>
         <span style={{fontSize:18,fontWeight:700,color:D.text,letterSpacing:"-0.3px"}}>BridgeFlow</span>
         <div style={{display:"flex",gap:2,background:D.card,borderRadius:8,padding:3,marginLeft:8}}>
-          {[["home","🏠 Home",0],["contacts","👥 Contacts",0],["dashboard","📅 Follow-ups",urgentCount],["cold","❄️ Cold",coldDueCount],["calendar","📅 Calendar",0]].map(([t,label,badge])=>(
+          {[["home","🏠 Home",0],["contacts","👥 Contacts",0],["dashboard","📅 Follow-ups",urgentCount],["warm","🔥 Warm",warmContacts.length],["cold","❄️ Cold",coldDueCount],["calendar","📅 Calendar",0]].map(([t,label,badge])=>(
             <button key={t} onClick={()=>switchTab(t)}
               style={{padding:"4px 12px",borderRadius:6,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t?600:400,background:tab===t?D.accent:"transparent",color:tab===t?"#fff":D.textSub,border:"none",display:"flex",alignItems:"center",gap:5}}>
               {label}
-              {badge>0&&<span style={{background:t==="cold"?"#1A3A50":D.red,color:t==="cold"?"#7AB8D4":"#fff",borderRadius:20,fontSize:11,fontWeight:700,padding:"0 5px",lineHeight:"16px"}}>{badge}</span>}
+              {badge>0&&<span style={{background:t==="cold"?"#1A3A50":t==="warm"?"#7C3800":D.red,color:t==="cold"?"#7AB8D4":t==="warm"?"#FDE68A":"#fff",borderRadius:20,fontSize:11,fontWeight:700,padding:"0 5px",lineHeight:"16px"}}>{badge}</span>}
             </button>
           ))}
         </div>
@@ -1515,7 +1500,7 @@ function App(){
       </div>
 
       <div style={{maxWidth:view==="calendar"?"100%":740,margin:"0 auto",padding:"30px 20px"}}>
-        {view==="home"     &&<HomeView contacts={contacts} followups={followups} switchTab={switchTab} setFilterStage={setFilterStage} onAddContact={addContactAction}/>}
+        {view==="home"     &&<HomeView contacts={contacts} followups={followups} warmContacts={warmContacts} switchTab={switchTab} setFilterStage={setFilterStage} onAddContact={addContactAction}/>}
         {view==="contacts" &&(
           <div>
             <BackHome switchTab={switchTab}/>
@@ -1550,7 +1535,7 @@ function App(){
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <span style={{fontWeight:600,fontSize:15,color:D.text}}>{c.name}</span><StageBadge stage={c.stage}/>
                       </div>
-                      <div style={{fontSize:13,color:D.textSub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.company,c.email].filter(Boolean).join(" · ")}</div>
+                      <div style={{fontSize:13,color:D.textSub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.title,c.company,c.email].filter(Boolean).join(" · ")}</div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0}}>
                       {u&&<RawUrgencyBadge u={u}/>}
@@ -1563,13 +1548,14 @@ function App(){
           </div>
         )}
         {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView} onAddContact={addContactAction} switchTab={switchTab}/>}
-        {view==="cold"     &&<ColdView  contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
+        {view==="warm"     &&<WarmView warmContacts={warmContacts} setWarmContacts={setWarmContacts} contacts={contacts} setContacts={setContacts} switchTab={switchTab} showToast={showToast}/>}
+        {view==="cold"     &&<ColdView contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
         {view==="calendar" &&<CalendarView contacts={contacts} switchTab={switchTab} calLinks={calLinks} setCalLinks={setCalLinks}/>}
         {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive} switchTab={switchTab} calLinks={calLinks}/>}
         {view==="add"      &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView} switchTab={switchTab}/>}
       </div>
 
-      {showImport&&<ImportModal contacts={contacts} onImport={(newC,skipped)=>{setContacts(prev=>[...newC,...prev]);setShowImport(false);showToast(`${newC.length} contacts imported to Cold list${skipped>0?`, ${skipped} duplicate${skipped>1?"s":""} skipped`:""}!`);}} onClose={()=>setShowImport(false)}/>}
+      {showImport&&<ImportModal contacts={contacts} warmContacts={warmContacts} mode="cold" onImport={(newC,skipped)=>{setContacts(prev=>[...newC,...prev]);setShowImport(false);showToast(`${newC.length} contacts imported to Cold list${skipped>0?`, ${skipped} skipped`:""}!`);}} onClose={()=>setShowImport(false)}/>}
       {showSettings&&<SettingsModal syncState={syncState} syncMsg={syncMsg} exportBackup={exportBackup} importBackup={importBackup} onClose={()=>setShowSettings(false)}/>}
       {toast&&(
         <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:toast.type==="err"?"#3D1515":"#0D2210",border:`1px solid ${toast.type==="err"?"#7F1D1D":"#166534"}`,color:toast.type==="err"?"#FCA5A5":"#86EFAC",borderRadius:10,padding:"11px 20px",fontSize:14,fontWeight:500,zIndex:200,whiteSpace:"nowrap",boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>
