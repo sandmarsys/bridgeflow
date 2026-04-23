@@ -14,6 +14,14 @@ const STAGE_META = {
   Client:       { bg:"#1A1200", text:"#FDE68A", dot:"#F59E0B", icon:"💰", desc:"Enrolled & active" },
   Continuation: { bg:"#1A0A1A", text:"#F0ABFC", dot:"#D946EF", icon:"♾️", desc:"Referrals & renewals" },
 };
+const CADENCE_BY_STAGE = {
+  Connection:   { days:[2,5,10,20],  labels:["Follow-up 1","Follow-up 2","Follow-up 3","Follow-up 4"] },
+  Conversation: { days:[1],          labels:["Follow-up 1"] },
+  Commitment:   { days:[1,3,5,7],    labels:["Follow-up 1","Follow-up 2","Follow-up 3","Follow-up 4"] },
+  Client:       { days:[1],          labels:["Follow-up 1"] },
+  Continuation: { days:[7,15,28],    labels:["Follow-up 1","Follow-up 2","Follow-up 3"] },
+};
+// fallback for legacy references
 const CADENCE_DAYS   = [2,5,10,20];
 const CADENCE_LABELS = ["Follow-up 1","Follow-up 2","Follow-up 3","Follow-up 4"];
 const COLD_MONTHS    = 3;
@@ -61,13 +69,14 @@ function stringToColor(str){
   let h=0; for(let i=0;i<str.length;i++) h=str.charCodeAt(i)+((h<<5)-h);
   return c[Math.abs(h)%c.length];
 }
-function getCadenceDates(stageEnteredAt) {
+function getCadenceDates(stageEnteredAt, stage) {
   if(!stageEnteredAt) return[];
-  return CADENCE_DAYS.map((d,i)=>({label:CADENCE_LABELS[i],date:addDays(stageEnteredAt,d),day:d}));
+  const cfg=CADENCE_BY_STAGE[stage]||CADENCE_BY_STAGE.Connection;
+  return cfg.days.map((d,i)=>({label:cfg.labels[i],date:addDays(stageEnteredAt,d),day:d}));
 }
 function getNextCadence(contact) {
   if(!contact.stageEnteredAt||contact.cold) return null;
-  const cadence=getCadenceDates(contact.stageEnteredAt);
+  const cadence=getCadenceDates(contact.stageEnteredAt, contact.stage);
   const completed=contact.cadenceCompleted||[];
   return cadence.find(c=>!completed.includes(c.date))||null;
 }
@@ -107,7 +116,7 @@ function getEventMeetingLink(ev) {
   return null;
 }
 
-const emptyContact={name:"",company:"",title:"",coaching:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:""};
+const emptyContact={name:"",company:"",title:"",coaching:"",email:"",phone:"",whatsapp:"",linkedin:"",stage:"Connection",notes:"",isPartner:false,isNetwork:false};
 const emptyNewEv=()=>({title:"",date:"",startTime:"09:00",endTime:"10:00",invitees:"",link:"",calendarId:"e.sand@marketingeddie.com"});
 
 function normalizeContact(c) {
@@ -119,6 +128,8 @@ function normalizeContact(c) {
     name:str(c.name),company:str(c.company),title:str(c.title),coaching:str(c.coaching),
     email:str(c.email),phone:str(c.phone),whatsapp:str(c.whatsapp),linkedin:str(c.linkedin),notes:str(c.notes),
     stage:str(c.stage)||"Connection",
+    isPartner:c.isPartner===true||c.isPartner==="TRUE",
+    isNetwork:c.isNetwork===true||c.isNetwork==="TRUE",
     createdAt:str(c.createdAt)||new Date().toISOString(),
     stageEnteredAt:safe(safeEnteredAt).split("T")[0],
     coldSince:str(c.coldSince),coldFollowUpDate:str(c.coldFollowUpDate),
@@ -140,8 +151,8 @@ function normalizeWarm(w){
 // ── SHEETS SYNC ───────────────────────────────────────────────────────────────
 function contactsToRows(contacts){
   return[
-    ["id","name","company","title","coaching","email","phone","whatsapp","linkedin","stage","notes","createdAt","conversations","stageEnteredAt","cadenceCompleted","cold","coldSince","coldFollowUpDate"],
-    ...contacts.map(c=>[c.id,c.name,c.company||"",c.title||"",c.coaching||"",c.email||"",c.phone||"",c.whatsapp||"",c.linkedin||"",c.stage,c.notes||"",c.createdAt,JSON.stringify(c.conversations||[]),c.stageEnteredAt||"",JSON.stringify(c.cadenceCompleted||[]),c.cold?"TRUE":"FALSE",c.coldSince||"",c.coldFollowUpDate||""])
+    ["id","name","company","title","coaching","email","phone","whatsapp","linkedin","stage","notes","createdAt","conversations","stageEnteredAt","cadenceCompleted","cold","coldSince","coldFollowUpDate","isPartner","isNetwork"],
+    ...contacts.map(c=>[c.id,c.name,c.company||"",c.title||"",c.coaching||"",c.email||"",c.phone||"",c.whatsapp||"",c.linkedin||"",c.stage,c.notes||"",c.createdAt,JSON.stringify(c.conversations||[]),c.stageEnteredAt||"",JSON.stringify(c.cadenceCompleted||[]),c.cold?"TRUE":"FALSE",c.coldSince||"",c.coldFollowUpDate||"",c.isPartner?"TRUE":"FALSE",c.isNetwork?"TRUE":"FALSE"])
   ];
 }
 function followupsToRows(followups){
@@ -355,7 +366,13 @@ function WarmBadge(){
     </span>
   );
 }
-function RawUrgencyBadge({u}){
+function PartnerBadge(){
+  return(<span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,background:"#0D2010",color:"#4ADE80",fontSize:12,fontWeight:600,border:"1px solid #14532D"}}>🤝 Partner</span>);
+}
+function NetworkBadge(){
+  return(<span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:20,background:"#1A1040",color:"#A78BFA",fontSize:12,fontWeight:600,border:"1px solid #3B2A7A"}}>🌐 Network</span>);
+}
+
   if(!u) return null;
   return(
     <span style={{fontSize:11,fontWeight:600,color:u.color,background:u.color+"22",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap"}}>
@@ -405,6 +422,20 @@ function AddEditView({form,setForm,editMode,saveContact,setView,switchTab}){
           <p style={{margin:"6px 0 0",fontSize:12,color:D.textMuted}}>{STAGE_META[form.stage]?.desc}</p>
         </div>
         <div><label style={S.lbl}>Notes</label><textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} style={{...S.inp,height:80,resize:"none"}} placeholder="Any important context…"/></div>
+        <div>
+          <label style={S.lbl}>Tags</label>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>setForm(f=>({...f,isPartner:!f.isPartner}))}
+              style={{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${form.isPartner?"#14532D":D.border}`,background:form.isPartner?"#0D2010":"transparent",color:form.isPartner?"#4ADE80":D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:form.isPartner?600:400}}>
+              🤝 Partner
+            </button>
+            <button onClick={()=>setForm(f=>({...f,isNetwork:!f.isNetwork}))}
+              style={{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${form.isNetwork?"#3B2A7A":D.border}`,background:form.isNetwork?"#1A1040":"transparent",color:form.isNetwork?"#A78BFA":D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:form.isNetwork?600:400}}>
+              🌐 Network
+            </button>
+          </div>
+          <p style={{margin:"6px 0 0",fontSize:12,color:D.textMuted}}>Tags appear in the Partnership and Network tabs.</p>
+        </div>
         <div style={{display:"flex",gap:10}}>
           <button onClick={saveContact} style={S.btn1}>{editMode?"Save Changes":"Add Contact"}</button>
           <button onClick={()=>setView(editMode?"detail":"contacts")} style={S.btn2}>Cancel</button>
@@ -451,7 +482,7 @@ function SettingsModal({syncState,syncMsg,exportBackup,importBackup,onClose}){
 // ── CADENCE TRACKER ───────────────────────────────────────────────────────────
 function CadenceTracker({contact,onComplete,onMoveToCold}){
   if(!contact.stageEnteredAt||contact.cold) return null;
-  const cadence=getCadenceDates(contact.stageEnteredAt);
+  const cadence=getCadenceDates(contact.stageEnteredAt, contact.stage);
   const completed=contact.cadenceCompleted||[];
   const allDone=cadence.every(c=>completed.includes(c.date));
   const m=STAGE_META[contact.stage]||STAGE_META.Connection;
@@ -599,11 +630,13 @@ function DetailView({selected,contacts,followups,setFollowups,setContacts,setVie
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:6}}>
               {contact.cold?<ColdBadge/>:<StageBadge stage={contact.stage} showDesc/>}
               {!contact.cold&&<UrgencyBadge contact={contact}/>}
+              {contact.isPartner&&<PartnerBadge/>}
+              {contact.isNetwork&&<NetworkBadge/>}
             </div>
           </div>
         </div>
         <div style={{display:"flex",gap:8}}>
-          {!contact.cold&&<button onClick={()=>{setForm({name:contact.name,company:contact.company||"",title:contact.title||"",coaching:contact.coaching||"",email:contact.email||"",phone:contact.phone||"",whatsapp:contact.whatsapp||"",linkedin:contact.linkedin||"",stage:contact.stage,notes:contact.notes||""});setEditMode(true);setView("add");}} style={S.btn2}>Edit</button>}
+          {!contact.cold&&<button onClick={()=>{          setForm({name:contact.name,company:contact.company||"",title:contact.title||"",coaching:contact.coaching||"",email:contact.email||"",phone:contact.phone||"",whatsapp:contact.whatsapp||"",linkedin:contact.linkedin||"",stage:contact.stage,notes:contact.notes||"",isPartner:contact.isPartner||false,isNetwork:contact.isNetwork||false});setEditMode(true);setView("add");}} style={S.btn2}>Edit</button>}
           <button onClick={()=>{if(window.confirm("Delete this contact?"))deleteContact(contact.id);}} style={{...S.btn2,color:"#F87171",borderColor:"#3D1515"}}>Delete</button>
         </div>
       </div>
@@ -821,6 +854,116 @@ function WarmView({warmContacts,setWarmContacts,contacts,setContacts,switchTab,s
           }}
           onClose={()=>setShowImport(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// ── PARTNERSHIP VIEW ──────────────────────────────────────────────────────────
+function PartnershipView({contacts,setSelected,setView,switchTab}){
+  const partners=contacts.filter(c=>c.isPartner);
+  return(
+    <div>
+      <BackHome switchTab={switchTab}/>
+      <div style={{marginBottom:24}}>
+        <h1 style={{margin:0,fontSize:28,fontWeight:700,color:"#4ADE80",letterSpacing:"-0.5px"}}>🤝 Partnerships</h1>
+        <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{partners.length} partner{partners.length!==1?"s":""} · mutual agreements & collaborations</p>
+      </div>
+      {partners.length===0?(
+        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
+          <div style={{fontSize:40,marginBottom:10}}>🤝</div>
+          <p style={{fontSize:14,marginBottom:16}}>No partners tagged yet.</p>
+          <p style={{fontSize:13,color:D.textMuted}}>Open any contact and toggle the Partner tag to add them here.</p>
+        </div>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {partners.map(c=>{
+            const u=!c.cold?getUrgency(c):null;
+            const lastNote=c.conversations?.[0];
+            return(
+              <div key={c.id} onClick={()=>{setSelected(c);setView("detail");}}
+                style={{background:D.card,border:"1.5px solid #14532D",borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13}}>
+                <div style={{width:40,height:40,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:700,color:"#fff"}}>{c.name.charAt(0).toUpperCase()}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontWeight:600,fontSize:15,color:D.text}}>{c.name}</span>
+                    <PartnerBadge/>
+                    {!c.cold&&<StageBadge stage={c.stage}/>}
+                    {c.cold&&<ColdBadge/>}
+                  </div>
+                  <div style={{fontSize:13,color:D.textSub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {[c.title,c.company].filter(Boolean).join(" · ")}
+                  </div>
+                  {lastNote&&<div style={{fontSize:12,color:D.textMuted,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>💬 {lastNote.text}</div>}
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  {u&&<RawUrgencyBadge u={u}/>}
+                  {c.linkedin&&<a href={c.linkedin.startsWith("http")?c.linkedin:`https://${c.linkedin}`} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:"block",fontSize:11,color:D.accent,textDecoration:"none",marginTop:4}}>LinkedIn →</a>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── NETWORK VIEW ──────────────────────────────────────────────────────────────
+function NetworkView({contacts,setSelected,setView,switchTab}){
+  const network=contacts.filter(c=>c.isNetwork);
+  const[search,setSearch]=useState("");
+  const filtered=network.filter(c=>{
+    const q=search.toLowerCase();
+    return !q||c.name.toLowerCase().includes(q)||(c.company||"").toLowerCase().includes(q)||(c.coaching||"").toLowerCase().includes(q)||(c.title||"").toLowerCase().includes(q);
+  });
+  return(
+    <div>
+      <BackHome switchTab={switchTab}/>
+      <div style={{marginBottom:24}}>
+        <h1 style={{margin:0,fontSize:28,fontWeight:700,color:"#A78BFA",letterSpacing:"-0.5px"}}>🌐 Network</h1>
+        <p style={{margin:"3px 0 0",color:D.textSub,fontSize:13}}>{network.length} professional{network.length!==1?"s":""} · introductions & referrals</p>
+      </div>
+      {network.length===0?(
+        <div style={{textAlign:"center",padding:"60px 20px",color:D.textMuted}}>
+          <div style={{fontSize:40,marginBottom:10}}>🌐</div>
+          <p style={{fontSize:14,marginBottom:16}}>No network contacts tagged yet.</p>
+          <p style={{fontSize:13,color:D.textMuted}}>Open any contact and toggle the Network tag to add them here.</p>
+        </div>
+      ):(
+        <>
+          <div style={{marginBottom:16}}>
+            <input placeholder="Search network…" value={search} onChange={e=>setSearch(e.target.value)}
+              style={{width:"100%",padding:"9px 14px",borderRadius:8,border:`1.5px solid ${D.border}`,fontSize:14,fontFamily:"inherit",outline:"none",background:D.surface,color:D.text,boxSizing:"border-box"}}/>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {filtered.map(c=>{
+              const lastNote=c.conversations?.[0];
+              return(
+                <div key={c.id} onClick={()=>{setSelected(c);setView("detail");}}
+                  style={{background:D.card,border:"1.5px solid #3B2A7A",borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:13}}>
+                  <div style={{width:40,height:40,borderRadius:"50%",background:stringToColor(c.name),display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16,fontWeight:700,color:"#fff"}}>{c.name.charAt(0).toUpperCase()}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontWeight:600,fontSize:15,color:D.text}}>{c.name}</span>
+                      <NetworkBadge/>
+                      {c.isPartner&&<PartnerBadge/>}
+                    </div>
+                    <div style={{fontSize:13,color:D.textSub,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {[c.title,c.coaching,c.company].filter(Boolean).join(" · ")}
+                    </div>
+                    {lastNote&&<div style={{fontSize:12,color:D.textMuted,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>💬 {lastNote.text}</div>}
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    {c.linkedin&&<a href={c.linkedin.startsWith("http")?c.linkedin:`https://${c.linkedin}`} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:"block",fontSize:11,color:D.accent,textDecoration:"none"}}>LinkedIn →</a>}
+                    {!c.cold&&<StageBadge stage={c.stage}/>}
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length===0&&search&&<p style={{fontSize:14,color:D.textMuted,textAlign:"center",padding:"30px 0"}}>No results for "{search}"</p>}
+          </div>
+        </>
       )}
     </div>
   );
@@ -1486,7 +1629,7 @@ function App(){
       <div style={{background:D.surface,borderBottom:`1px solid ${D.border}`,padding:"0 20px",display:"flex",alignItems:"center",height:52,gap:12}}>
         <span style={{fontSize:18,fontWeight:700,color:D.text,letterSpacing:"-0.3px"}}>BridgeFlow</span>
         <div style={{display:"flex",gap:2,background:D.card,borderRadius:8,padding:3,marginLeft:8}}>
-          {[["home","🏠 Home",0],["contacts","👥 Contacts",0],["dashboard","📅 Follow-ups",urgentCount],["warm","🔥 Warm",warmContacts.length],["cold","❄️ Cold",coldDueCount],["calendar","📅 Calendar",0]].map(([t,label,badge])=>(
+          {[["home","🏠 Home",0],["contacts","👥 Contacts",0],["dashboard","📅 Follow-ups",urgentCount],["warm","🔥 Warm",warmContacts.length],["cold","❄️ Cold",coldDueCount],["partnerships","🤝 Partners",0],["network","🌐 Network",0],["calendar","📅 Calendar",0]].map(([t,label,badge])=>(
             <button key={t} onClick={()=>switchTab(t)}
               style={{padding:"4px 12px",borderRadius:6,fontSize:13,fontFamily:"inherit",cursor:"pointer",fontWeight:tab===t?600:400,background:tab===t?D.accent:"transparent",color:tab===t?"#fff":D.textSub,border:"none",display:"flex",alignItems:"center",gap:5}}>
               {label}
@@ -1548,8 +1691,10 @@ function App(){
           </div>
         )}
         {view==="dashboard"&&<Dashboard contacts={contacts} followups={followups} setSelected={setSelected} setView={setView} onAddContact={addContactAction} switchTab={switchTab}/>}
-        {view==="warm"     &&<WarmView warmContacts={warmContacts} setWarmContacts={setWarmContacts} contacts={contacts} setContacts={setContacts} switchTab={switchTab} showToast={showToast}/>}
-        {view==="cold"     &&<ColdView contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
+        {view==="warm"        &&<WarmView warmContacts={warmContacts} setWarmContacts={setWarmContacts} contacts={contacts} setContacts={setContacts} switchTab={switchTab} showToast={showToast}/>}
+        {view==="cold"        &&<ColdView contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
+        {view==="partnerships"&&<PartnershipView contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
+        {view==="network"     &&<NetworkView contacts={contacts} setSelected={setSelected} setView={setView} switchTab={switchTab}/>}
         {view==="calendar" &&<CalendarView contacts={contacts} switchTab={switchTab} calLinks={calLinks} setCalLinks={setCalLinks}/>}
         {view==="detail"   &&<SafeDetailView selected={selected} contacts={contacts} followups={followups} setFollowups={setFollowups} setContacts={setContacts} setView={setView} setForm={setForm} setEditMode={setEditMode} deleteContact={deleteContact} addLog={addLog} newLog={newLog} setNewLog={setNewLog} addFollowup={addFollowup} newFU={newFU} setNewFU={setNewFU} showFU={showFU} setShowFU={setShowFU} logRef={logRef} onCompleteCadence={onCompleteCadence} onMoveToCold={onMoveToCold} onRevive={onRevive} switchTab={switchTab} calLinks={calLinks}/>}
         {view==="add"      &&<AddEditView form={form} setForm={setForm} editMode={editMode} saveContact={saveContact} setView={setView} switchTab={switchTab}/>}
