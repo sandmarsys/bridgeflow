@@ -422,19 +422,19 @@ function AddEditView({form,setForm,editMode,saveContact,setView,switchTab}){
           <p style={{margin:"6px 0 0",fontSize:12,color:D.textMuted}}>{STAGE_META[form.stage]?.desc}</p>
         </div>
         <div><label style={S.lbl}>Notes</label><textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} style={{...S.inp,height:80,resize:"none"}} placeholder="Any important context…"/></div>
-        <div>
-          <label style={S.lbl}>Tags</label>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={()=>setForm(f=>({...f,isPartner:!f.isPartner}))}
-              style={{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${form.isPartner?"#14532D":D.border}`,background:form.isPartner?"#0D2010":"transparent",color:form.isPartner?"#4ADE80":D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:form.isPartner?600:400}}>
-              🤝 Partner
+        <div style={{background:D.surface,borderRadius:10,padding:"14px 16px",border:`1px solid ${D.border}`}}>
+          <label style={{...S.lbl,marginBottom:10}}>Tags</label>
+          <div style={{display:"flex",gap:10,marginBottom:8}}>
+            <button type="button" onClick={()=>setForm(f=>({...f,isPartner:!f.isPartner}))}
+              style={{flex:1,padding:"10px 16px",borderRadius:10,border:`2px solid ${form.isPartner?"#4ADE80":D.border}`,background:form.isPartner?"#0D2010":"transparent",color:form.isPartner?"#4ADE80":D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:form.isPartner?700:400,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <span>🤝</span> Partner {form.isPartner&&<span style={{fontSize:11,background:"#4ADE8033",padding:"1px 7px",borderRadius:20}}>ON</span>}
             </button>
-            <button onClick={()=>setForm(f=>({...f,isNetwork:!f.isNetwork}))}
-              style={{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${form.isNetwork?"#3B2A7A":D.border}`,background:form.isNetwork?"#1A1040":"transparent",color:form.isNetwork?"#A78BFA":D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:form.isNetwork?600:400}}>
-              🌐 Network
+            <button type="button" onClick={()=>setForm(f=>({...f,isNetwork:!f.isNetwork}))}
+              style={{flex:1,padding:"10px 16px",borderRadius:10,border:`2px solid ${form.isNetwork?"#A78BFA":D.border}`,background:form.isNetwork?"#1A1040":"transparent",color:form.isNetwork?"#A78BFA":D.textSub,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:form.isNetwork?700:400,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <span>🌐</span> Network {form.isNetwork&&<span style={{fontSize:11,background:"#A78BFA33",padding:"1px 7px",borderRadius:20}}>ON</span>}
             </button>
           </div>
-          <p style={{margin:"6px 0 0",fontSize:12,color:D.textMuted}}>Tags appear in the Partnership and Network tabs.</p>
+          <p style={{margin:0,fontSize:12,color:D.textMuted}}>Tags appear in the Partnership and Network tabs. Click to toggle on or off.</p>
         </div>
         <div style={{display:"flex",gap:10}}>
           <button onClick={saveContact} style={S.btn1}>{editMode?"Save Changes":"Add Contact"}</button>
